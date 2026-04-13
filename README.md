@@ -45,6 +45,7 @@ git add .
 2. コミットメッセージを生成
 
 ```bash
+# 通常（タイトル + 箇条書き本文）
 ai-git commit
 ```
 
@@ -79,14 +80,33 @@ ai-git commit
 
 ```bash
 ai-git pr
+
+# 言語指定も可能
 ai-git pr --lang en
 ```
 
-`ai-git pr` は自動的に以下を実行します。
+`ai-git pr` は自動的に以下を実行します:
 
-- ブランチが未 push の場合 `git push -u origin <branch>`
-- ローカルに新しいコミットがある場合 `git push`
-- PR説明文を生成して PR 作成
+- ブランチがまだpushされていない場合、`git push -u origin <branch>` を実行
+- ローカルに新しいコミットがある場合、`git push` を実行
+- PR説明文を生成してPRを作成
+
+3. 確認プロンプトで選択
+
+- `y`: PRを作成
+- `n`: 中止
+- `e`: エディタで編集してから作成
+
+**前提条件:**
+
+- GitHub CLI (`gh`) がインストール済み ([インストール方法](https://cli.github.com/))
+- `gh auth login` で認証済み
+
+**生成されるPR説明文のフォーマット:**
+
+- ## Summary: 変更の概要（2-3文）
+- ## Changes: 具体的な変更内容（箇条書き）
+- ## Test plan: テスト方法（箇条書き）
 
 ## 開発
 

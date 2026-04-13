@@ -10,8 +10,11 @@ type Language = "ja" | "en";
 
 // ── フラグ解析 ──────────────────────────────────────────
 const args = process.argv.slice(2);
+
+// サブコマンドの抽出
 const subcommand = args[0];
 const subcommandArgs = args.slice(1);
+
 const showHelp =
   args.includes("--help") || args.includes("-h") || subcommand === "help";
 const setLangArg = getOptionValue(args, "--set-lang");
@@ -65,6 +68,7 @@ if (!subcommand || (subcommand !== "commit" && subcommand !== "pr")) {
   console.error("Run 'ai-git --help' for usage information");
   process.exit(1);
 }
+
 const language = resolveLanguage(langArg);
 
 // ── git diff 取得 ────────────────────────────────────────
@@ -198,9 +202,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(
-    "🤖 コミットメッセージを生成中... (compact summary input)",
-  );
+  console.log("🤖 コミットメッセージを生成中... (compact summary input)");
 
   const message = await generateCommitMessage(diff);
 
@@ -334,7 +336,9 @@ function handleGroqError(error: unknown): void {
     lower.includes("quota") ||
     lower.includes("rate")
   ) {
-    console.error("❌ Groq API の利用上限に達しました（429: quota/rate limit）。");
+    console.error(
+      "❌ Groq API の利用上限に達しました（429: quota/rate limit）。",
+    );
     console.error("   - 少し待って再実行してください");
     console.error("   - https://console.groq.com で利用枠を確認してください");
     console.error("   - 必要なら別プロジェクトの API キーを利用してください");
@@ -346,7 +350,9 @@ function handleGroqError(error: unknown): void {
     lower.includes("403") ||
     lower.includes("api key")
   ) {
-    console.error("❌ Groq API 認証エラーです。GROQ_API_KEY を確認してください。");
+    console.error(
+      "❌ Groq API 認証エラーです。GROQ_API_KEY を確認してください。",
+    );
     console.error("   取得先: https://console.groq.com/keys");
     return;
   }
@@ -383,9 +389,7 @@ function checkGHAuth(): void {
     if (language === "ja") {
       console.error("❌ GitHub CLI の認証が必要です。");
       console.error("   次を実行してください: gh auth login");
-      console.error(
-        "   もしくは GH_TOKEN を環境変数に設定してください。",
-      );
+      console.error("   もしくは GH_TOKEN を環境変数に設定してください。");
     } else {
       console.error("❌ GitHub CLI authentication is required.");
       console.error("   Run: gh auth login");
@@ -532,7 +536,11 @@ async function generatePRDescription(baseBranch: string): Promise<string> {
     if (isRequestTooLargeError(error)) {
       const compactCommits = truncateByChars(commits, 1200);
       const compactDiff = truncateByChars(diff, 2200);
-      const compactPrompt = buildPRPrompt(compactCommits, compactDiff, language);
+      const compactPrompt = buildPRPrompt(
+        compactCommits,
+        compactDiff,
+        language,
+      );
 
       if (language === "ja") {
         console.log(
@@ -655,10 +663,10 @@ async function mainPR() {
       encoding: "utf-8",
       stdio: "pipe",
     }).trim();
-    const remoteCommit = execSync(
-      `git rev-parse ${currentBranch}@{upstream}`,
-      { encoding: "utf-8", stdio: "pipe" },
-    ).trim();
+    const remoteCommit = execSync(`git rev-parse ${currentBranch}@{upstream}`, {
+      encoding: "utf-8",
+      stdio: "pipe",
+    }).trim();
 
     if (localCommit !== remoteCommit) {
       // ローカルに新しいコミットがある場合は push

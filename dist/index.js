@@ -45,6 +45,7 @@ const path = __importStar(require("path"));
 const openai_1 = __importDefault(require("openai"));
 // ── フラグ解析 ──────────────────────────────────────────
 const args = process.argv.slice(2);
+// サブコマンドの抽出
 const subcommand = args[0];
 const subcommandArgs = args.slice(1);
 const showHelp = args.includes("--help") || args.includes("-h") || subcommand === "help";
@@ -607,7 +608,10 @@ async function mainPR() {
             encoding: "utf-8",
             stdio: "pipe",
         }).trim();
-        const remoteCommit = (0, child_process_1.execSync)(`git rev-parse ${currentBranch}@{upstream}`, { encoding: "utf-8", stdio: "pipe" }).trim();
+        const remoteCommit = (0, child_process_1.execSync)(`git rev-parse ${currentBranch}@{upstream}`, {
+            encoding: "utf-8",
+            stdio: "pipe",
+        }).trim();
         if (localCommit !== remoteCommit) {
             // ローカルに新しいコミットがある場合は push
             console.log(`📤 ブランチを push 中... (origin ${currentBranch})`);
