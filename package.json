@@ -1,5 +1,5 @@
 {
-  "name": "ai-git",
+  "name": "ai-git-tool",
   "version": "1.0.0",
   "description": "AI-powered git commit and PR description generator using Groq API",
   "main": "dist/index.js",
