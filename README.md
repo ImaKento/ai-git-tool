@@ -2,6 +2,8 @@
 
 AIを使って、ステージ済み差分からコミットメッセージと PR 説明文を自動生成する TypeScript 製 CLI です。
 
+<video src="https://github.com/user-attachments/assets/c3826580-eb80-409a-b3fc-cc19f006cceb" />　　
+
 ## セットアップ
 
 ```bash
