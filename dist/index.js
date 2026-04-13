@@ -33,13 +33,16 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const child_process_1 = require("child_process");
 const readline = __importStar(require("readline"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-const generative_ai_1 = require("@google/generative-ai");
+const openai_1 = __importDefault(require("openai"));
 // ── フラグ解析 ──────────────────────────────────────────
 const args = process.argv.slice(2);
 // サブコマンドの抽出
@@ -47,7 +50,13 @@ const subcommand = args[0];
 const subcommandArgs = args.slice(1);
 const showHelp = args.includes("--help") || args.includes("-h") || subcommand === "help";
 const setLangArg = getOptionValue(args, "--set-lang");
-// --set-lang は特別扱い（サブコマンド不要）
+const langArg = getOptionValue(subcommandArgs, "--lang");
+const CONFIG_DIR = path.join(os.homedir(), ".ai-commit");
+const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+const defaultGroqModel = "llama-3.1-8b-instant";
+const COMMIT_DIFF_COMPACT_CHARS = 3500;
+const PR_COMMITS_COMPACT_CHARS = 1800;
+const PR_DIFF_COMPACT_CHARS = 3500;
 if (setLangArg) {
     const nextLang = parseLanguage(setLangArg);
     if (!nextLang) {
@@ -58,11 +67,6 @@ if (setLangArg) {
     console.log(`✅ デフォルト言語を '${nextLang}' に保存しました。`);
     process.exit(0);
 }
-// サブコマンド固有のフラグ
-const short = subcommandArgs.includes("--short");
-const langArg = getOptionValue(subcommandArgs, "--lang");
-const CONFIG_DIR = path.join(os.homedir(), ".ai-commit");
-const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 if (showHelp) {
     console.log(`
 Usage: ai-git <command> [options]
@@ -72,7 +76,6 @@ Commands:
   pr                Generate PR description and create pull request
 
 Commit Options:
-  --short           Generate a short one-line commit message
   --lang <ja|en>    Set language for this run
 
 PR Options:
@@ -83,30 +86,14 @@ Global Options:
   --help, -h        Show this help message
 
 Environment:
-  GEMINI_API_KEY   Your Google Gemini API key (required)
-
-Examples:
-  ai-git commit
-  ai-git commit --short --lang en
-  ai-git pr
-  ai-git pr --lang en
-  ai-git --set-lang ja
+  GROQ_API_KEY     Your Groq API key (required)
+  GROQ_MODEL       Optional model name (default: llama-3.1-8b-instant)
 `);
     process.exit(0);
 }
-// サブコマンドの検証
 if (!subcommand || (subcommand !== "commit" && subcommand !== "pr")) {
     console.error("Error: Please specify a command: 'commit' or 'pr'");
     console.error("Run 'ai-git --help' for usage information");
-    process.exit(1);
-}
-// commit サブコマンド固有のバリデーション
-if (subcommand === "commit" && short && subcommandArgs.length > 2) {
-    // 追加のバリデーションが必要な場合
-}
-// pr サブコマンドでは --short は使えない
-if (subcommand === "pr" && short) {
-    console.error("Error: --short cannot be used with 'pr' command");
     process.exit(1);
 }
 const language = resolveLanguage(langArg);
@@ -120,58 +107,23 @@ function getStagedDiff() {
         process.exit(1);
     }
 }
-// ── Gemini APIでコミットメッセージ生成 ───────────────────
+// ── Groq APIでコミットメッセージ生成 ───────────────────
 async function generateCommitMessage(diff) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-        console.error("❌ GEMINI_API_KEY が未設定です。");
-        console.error('   取得先: https://aistudio.google.com/apikey\n   例: export GEMINI_API_KEY="your_api_key"');
-        process.exit(1);
-    }
-    const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    const prompt = buildPrompt(diff, short, language);
+    const inputDiff = truncateByChars(diff, COMMIT_DIFF_COMPACT_CHARS);
+    const prompt = buildPrompt(inputDiff, language);
     try {
-        const result = await model.generateContent(prompt);
-        return result.response.text().trim();
+        return await generateText(prompt);
     }
     catch (error) {
-        handleGeminiError(error);
+        if (isRequestTooLargeError(error)) {
+            const smallerDiff = truncateByChars(diff, 1800);
+            return generateText(buildPrompt(smallerDiff, language));
+        }
+        handleGroqError(error);
         process.exit(1);
     }
 }
-function buildPrompt(diff, useShort, lang) {
-    if (useShort) {
-        if (lang === "ja") {
-            return `あなたは git のコミットメッセージ作成の専門家です。
-次の git diff から、Conventional Commits 形式の1行コミットメッセージを生成してください。
-
-ルール:
-- 形式: <type>(<optional scope>): <short description>
-- type: feat, fix, docs, style, refactor, test, chore
-- 72文字以内
-- 命令形を使う（「追加した」ではなく「追加する」）
-- 文末に句点を付けない
-- 出力はコミットメッセージ本文のみ（説明文は不要）
-- 説明文は日本語にする
-
-Git diff:
-${diff}`;
-        }
-        return `You are an expert at writing git commit messages.
-Generate a single commit message in Conventional Commits format for the following git diff.
-
-Rules:
-- Format: <type>(<optional scope>): <short description>
-- Types: feat, fix, docs, style, refactor, test, chore
-- Max 72 characters
-- Use imperative mood ("add" not "added")
-- No period at the end
-- Output ONLY the commit message, nothing else
-
-Git diff:
-${diff}`;
-    }
+function buildPrompt(diff, lang) {
     if (lang === "ja") {
         return `あなたは git のコミットメッセージ作成の専門家です。
 次の git diff から、Conventional Commits 形式の詳細コミットメッセージを生成してください。
@@ -257,15 +209,15 @@ function doCommit(message) {
 // ── メイン ───────────────────────────────────────────────
 async function main() {
     if (subcommand === "pr") {
-        return mainPR();
+        await mainPR();
+        return;
     }
-    // subcommand === "commit"
     const diff = getStagedDiff();
     if (!diff.trim()) {
         console.log("No staged changes found. Run `git add` first.");
         process.exit(1);
     }
-    console.log("🤖 コミットメッセージを生成中...");
+    console.log("🤖 コミットメッセージを生成中... (compact summary input)");
     const message = await generateCommitMessage(diff);
     console.log(`\n📝 Generated commit message:\n`);
     // 詳細モードは複数行なのでインデントして表示
@@ -347,26 +299,48 @@ function saveConfig(config) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
     fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
 }
-function handleGeminiError(error) {
+function getGroqClient() {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+        console.error("❌ GROQ_API_KEY が未設定です。");
+        console.error('   取得先: https://console.groq.com/keys\n   例: export GROQ_API_KEY="your_api_key"');
+        process.exit(1);
+    }
+    return new openai_1.default({
+        apiKey,
+        baseURL: "https://api.groq.com/openai/v1",
+    });
+}
+async function generateText(prompt) {
+    const client = getGroqClient();
+    const model = process.env.GROQ_MODEL || defaultGroqModel;
+    const res = await client.chat.completions.create({
+        model,
+        temperature: 0.2,
+        messages: [{ role: "user", content: prompt }],
+    });
+    return res.choices[0]?.message?.content?.trim() || "";
+}
+function handleGroqError(error) {
     const message = error instanceof Error ? error.message : String(error);
     const lower = message.toLowerCase();
     if (lower.includes("429") ||
         lower.includes("quota") ||
         lower.includes("rate")) {
-        console.error("❌ Gemini API の利用上限に達しました（429: quota/rate limit）。");
+        console.error("❌ Groq API の利用上限に達しました（429: quota/rate limit）。");
         console.error("   - 少し待って再実行してください");
-        console.error("   - Google AI Studio / GCP で請求設定と利用枠を確認してください");
+        console.error("   - https://console.groq.com で利用枠を確認してください");
         console.error("   - 必要なら別プロジェクトの API キーを利用してください");
         return;
     }
     if (lower.includes("401") ||
         lower.includes("403") ||
         lower.includes("api key")) {
-        console.error("❌ Gemini API 認証エラーです。GEMINI_API_KEY を確認してください。");
-        console.error("   取得先: https://aistudio.google.com/apikey");
+        console.error("❌ Groq API 認証エラーです。GROQ_API_KEY を確認してください。");
+        console.error("   取得先: https://console.groq.com/keys");
         return;
     }
-    console.error("❌ Gemini API 呼び出しに失敗しました。");
+    console.error("❌ Groq API 呼び出しに失敗しました。");
     console.error(`   詳細: ${message}`);
 }
 // ── PR生成用の関数群 ─────────────────────────────────────
@@ -385,6 +359,55 @@ function checkGHCLI() {
         }
         process.exit(1);
     }
+}
+function checkGHAuth() {
+    if (process.env.GH_TOKEN) {
+        return;
+    }
+    try {
+        (0, child_process_1.execSync)("gh auth status", { encoding: "utf-8", stdio: "pipe" });
+    }
+    catch {
+        if (language === "ja") {
+            console.error("❌ GitHub CLI の認証が必要です。");
+            console.error("   次を実行してください: gh auth login");
+            console.error("   もしくは GH_TOKEN を環境変数に設定してください。");
+        }
+        else {
+            console.error("❌ GitHub CLI authentication is required.");
+            console.error("   Run: gh auth login");
+            console.error("   Or set GH_TOKEN environment variable.");
+        }
+        process.exit(1);
+    }
+}
+function getPullRequestURL(branch) {
+    try {
+        const remoteUrl = (0, child_process_1.execSync)("git remote get-url origin", {
+            encoding: "utf-8",
+            stdio: "pipe",
+        }).trim();
+        const repoPath = parseGitHubRepoPath(remoteUrl);
+        if (!repoPath) {
+            return null;
+        }
+        return `https://github.com/${repoPath}/pull/new/${branch}`;
+    }
+    catch {
+        return null;
+    }
+}
+function parseGitHubRepoPath(remoteUrl) {
+    const normalized = remoteUrl.replace(/\.git$/, "");
+    const sshMatch = normalized.match(/^git@github\.com:(.+\/.+)$/);
+    if (sshMatch) {
+        return sshMatch[1];
+    }
+    const httpsMatch = normalized.match(/^https:\/\/github\.com\/(.+\/.+)$/);
+    if (httpsMatch) {
+        return httpsMatch[1];
+    }
+    return null;
 }
 function detectBaseBranch() {
     // Try 1: Get default branch from remote
@@ -428,7 +451,7 @@ function getBranchDiff(baseBranch) {
         });
         return { commits, diff };
     }
-    catch (error) {
+    catch {
         if (language === "ja") {
             console.error("❌ ブランチの差分取得に失敗しました。");
         }
@@ -478,25 +501,50 @@ ${diff}`;
 }
 async function generatePRDescription(baseBranch) {
     const { commits, diff } = getBranchDiff(baseBranch);
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-        console.error("❌ GEMINI_API_KEY が未設定です。");
-        console.error('   取得先: https://aistudio.google.com/apikey\n   例: export GEMINI_API_KEY="your_api_key"');
-        process.exit(1);
-    }
-    const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    const prompt = buildPRPrompt(commits, diff, language);
+    const inputCommits = truncateByChars(commits, PR_COMMITS_COMPACT_CHARS);
+    const inputDiff = truncateByChars(diff, PR_DIFF_COMPACT_CHARS);
+    const prompt = buildPRPrompt(inputCommits, inputDiff, language);
     try {
-        const result = await model.generateContent(prompt);
-        return result.response.text().trim();
+        return await generateText(prompt);
     }
     catch (error) {
-        handleGeminiError(error);
+        if (isRequestTooLargeError(error)) {
+            const compactCommits = truncateByChars(commits, 1200);
+            const compactDiff = truncateByChars(diff, 2200);
+            const compactPrompt = buildPRPrompt(compactCommits, compactDiff, language);
+            if (language === "ja") {
+                console.log("ℹ️ 入力サイズが大きいため、差分を要約モードにして再試行します...");
+            }
+            else {
+                console.log("ℹ️ Input is too large. Retrying with compact diff summary...");
+            }
+            try {
+                return await generateText(compactPrompt);
+            }
+            catch (retryError) {
+                handleGroqError(retryError);
+                process.exit(1);
+            }
+        }
+        handleGroqError(error);
         process.exit(1);
     }
 }
-function createPR(description, baseBranch) {
+function truncateByChars(input, maxChars) {
+    if (input.length <= maxChars) {
+        return input;
+    }
+    return `${input.slice(0, maxChars)}\n\n... (truncated)`;
+}
+function isRequestTooLargeError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
+    return (lower.includes("413") ||
+        lower.includes("request too large") ||
+        lower.includes("tokens per minute") ||
+        lower.includes("tpm"));
+}
+function createPR(description, baseBranch, fallbackURL) {
     // Extract title from first non-header line
     const lines = description.split("\n");
     const titleLine = lines.find((l) => l.trim() && !l.startsWith("#")) || "Pull Request";
@@ -509,19 +557,32 @@ function createPR(description, baseBranch) {
         titleLine.trim(),
         "--body",
         description,
-    ], { stdio: "inherit" });
+    ], { encoding: "utf-8", stdio: "pipe" });
+    if (result.stdout) {
+        process.stdout.write(result.stdout);
+    }
+    if (result.stderr) {
+        process.stderr.write(result.stderr);
+    }
     if (result.status !== 0) {
         if (language === "ja") {
             console.error("❌ PR の作成に失敗しました。");
+            if (fallbackURL) {
+                console.error(`   手動で作成する場合: ${fallbackURL}`);
+            }
         }
         else {
             console.error("❌ Failed to create PR.");
+            if (fallbackURL) {
+                console.error(`   Create manually: ${fallbackURL}`);
+            }
         }
         process.exit(1);
     }
 }
 async function mainPR() {
     checkGHCLI();
+    checkGHAuth();
     const baseBranch = detectBaseBranch();
     const currentBranch = (0, child_process_1.execSync)("git branch --show-current", {
         encoding: "utf-8",
@@ -547,7 +608,10 @@ async function mainPR() {
             encoding: "utf-8",
             stdio: "pipe",
         }).trim();
-        const remoteCommit = (0, child_process_1.execSync)(`git rev-parse ${currentBranch}@{upstream}`, { encoding: "utf-8", stdio: "pipe" }).trim();
+        const remoteCommit = (0, child_process_1.execSync)(`git rev-parse ${currentBranch}@{upstream}`, {
+            encoding: "utf-8",
+            stdio: "pipe",
+        }).trim();
         if (localCommit !== remoteCommit) {
             // ローカルに新しいコミットがある場合は push
             console.log(`📤 ブランチを push 中... (origin ${currentBranch})`);
@@ -572,7 +636,7 @@ async function mainPR() {
             process.exit(1);
         }
     }
-    console.log(`🤖 PR説明文を生成中... (${baseBranch}...${currentBranch})`);
+    console.log(`🤖 PR説明文を生成中... (${baseBranch}...${currentBranch}) [compact summary input]`);
     const description = await generatePRDescription(baseBranch);
     console.log(`\n📝 Generated PR description:\n`);
     description.split("\n").forEach((line) => {
@@ -597,6 +661,7 @@ async function mainPR() {
         console.log("Aborted.");
         process.exit(0);
     }
-    createPR(finalDescription, baseBranch);
+    const fallbackURL = getPullRequestURL(currentBranch);
+    createPR(finalDescription, baseBranch, fallbackURL);
     console.log(`\n✅ PR created successfully!`);
 }
