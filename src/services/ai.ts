@@ -1,10 +1,14 @@
 import OpenAI from "openai";
 import type { Language } from "../types.js";
-import { showFriendlyError, handleGroqError, isRequestTooLargeError } from "../utils/errors.js";
+import {
+  showFriendlyError,
+  handleGroqError,
+  isRequestTooLargeError,
+} from "../utils/errors.js";
 import { truncateByChars } from "../utils/text.js";
 import { getChangedFiles, getCombinedDiff } from "../utils/git.js";
 
-const defaultGroqModel = "llama-3.1-8b-instant";
+const defaultGroqModel = "llama-3.3-70b-versatile";
 const COMMIT_DIFF_COMPACT_CHARS = 3500;
 const PR_COMMITS_COMPACT_CHARS = 1800;
 const PR_DIFF_COMPACT_CHARS = 3500;
@@ -23,7 +27,7 @@ export function getGroqClient(): OpenAI {
         "API キーを取得: https://console.groq.com/keys",
         "環境変数に設定:",
         '  - 一時的: export GROQ_API_KEY="gsk_..."',
-        '  - 永続的: ~/.bashrc や ~/.zshrc に上記を追加',
+        "  - 永続的: ~/.bashrc や ~/.zshrc に上記を追加",
       ],
       [
         "API キー設定後に ai-git commit を実行",
@@ -172,7 +176,9 @@ function normalizeGeneratedCommitMessage(
   const lines = raw
     .split("\n")
     .map((line) => line.replace(/\s+$/g, ""))
-    .filter((_, idx, arr) => !(idx > 0 && arr[idx - 1] === "" && arr[idx] === ""));
+    .filter(
+      (_, idx, arr) => !(idx > 0 && arr[idx - 1] === "" && arr[idx] === ""),
+    );
 
   if (lines.length === 0) {
     return buildFallbackCommitMessage(diff, lang);
@@ -197,7 +203,10 @@ function normalizeGeneratedCommitMessage(
 /**
  * git diff から AI を使ってコミットメッセージを生成
  */
-export async function generateCommitMessage(diff: string, language: Language): Promise<string> {
+export async function generateCommitMessage(
+  diff: string,
+  language: Language,
+): Promise<string> {
   const inputDiff = truncateByChars(diff, COMMIT_DIFF_COMPACT_CHARS);
   const prompt = buildCommitPrompt(inputDiff, language);
   try {
@@ -206,7 +215,9 @@ export async function generateCommitMessage(diff: string, language: Language): P
   } catch (error) {
     if (isRequestTooLargeError(error)) {
       const smallerDiff = truncateByChars(diff, 1800);
-      const retryRaw = await generateText(buildCommitPrompt(smallerDiff, language));
+      const retryRaw = await generateText(
+        buildCommitPrompt(smallerDiff, language),
+      );
       return normalizeGeneratedCommitMessage(retryRaw, diff, language);
     }
     handleGroqError(error);
@@ -338,7 +349,10 @@ export function extractPRTitle(raw: string): string {
 export function stripTitleLine(raw: string): string {
   const lines = raw.split("\n");
   if (/^Title:\s*/i.test(lines[0]?.trim() ?? "")) {
-    return lines.slice(lines[1]?.trim() === "" ? 2 : 1).join("\n").trimStart();
+    return lines
+      .slice(lines[1]?.trim() === "" ? 2 : 1)
+      .join("\n")
+      .trimStart();
   }
   return raw;
 }
@@ -349,7 +363,10 @@ export function stripTitleLine(raw: string): string {
 export async function generatePRDescription(
   baseBranch: string,
   language: Language,
-  getBranchDiff: (baseBranch: string, language: Language) => { commits: string; diff: string },
+  getBranchDiff: (
+    baseBranch: string,
+    language: Language,
+  ) => { commits: string; diff: string },
 ): Promise<string> {
   const { commits, diff } = getBranchDiff(baseBranch, language);
   const inputCommits = truncateByChars(commits, PR_COMMITS_COMPACT_CHARS);
