@@ -45,6 +45,7 @@ Usage: ai-git <command> [options]
 
 Commands:
   commit            Generate commit message from staged changes
+  push              Commit with AI message and push to remote (git add . + commit + push)
   pr                Generate PR description and create pull request
   checkout          Create branch from current changes
 
@@ -68,9 +69,14 @@ Environment:
 
 if (
   !subcommand ||
-  (subcommand !== "commit" && subcommand !== "pr" && subcommand !== "checkout")
+  (subcommand !== "commit" &&
+    subcommand !== "push" &&
+    subcommand !== "pr" &&
+    subcommand !== "checkout")
 ) {
-  console.error("Error: Please specify a command: 'commit', 'pr' or 'checkout'");
+  console.error(
+    "Error: Please specify a command: 'commit', 'push', 'pr' or 'checkout'",
+  );
   console.error("Run 'ai-git --help' for usage information");
   process.exit(1);
 }
@@ -521,18 +527,8 @@ function branchExists(name: string): boolean {
   }
 }
 
-// ── メイン ───────────────────────────────────────────────
-async function main() {
-  if (subcommand === "checkout") {
-    await mainCheckout();
-    return;
-  }
-
-  if (subcommand === "pr") {
-    await mainPR();
-    return;
-  }
-
+// ── コミットフロー共通処理 ────────────────────────────────
+async function runCommitFlow(): Promise<void> {
   if (!noAdd) {
     console.log("📦 変更をステージしています... (git add .)");
     stageAllChanges();
@@ -550,7 +546,6 @@ async function main() {
   const message = await generateCommitMessage(diff);
 
   console.log(`\n📝 Generated commit message:\n`);
-  // 詳細モードは複数行なのでインデントして表示
   message.split("\n").forEach((line) => {
     console.log(`  ${line}`);
   });
@@ -578,6 +573,60 @@ async function main() {
 
   doCommit(finalMessage);
   console.log(`\n✅ Committed successfully!`);
+}
+
+// ── push サブコマンド ─────────────────────────────────────
+async function mainPush(): Promise<void> {
+  await runCommitFlow();
+
+  const currentBranch = execSync("git branch --show-current", {
+    encoding: "utf-8",
+  }).trim();
+
+  // upstream が設定済みか確認し、なければ -u origin で push
+  try {
+    execSync(`git rev-parse --abbrev-ref ${currentBranch}@{upstream}`, {
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+    console.log(`📤 push 中... (origin ${currentBranch})`);
+    const pushResult = spawnSync("git", ["push"], { stdio: "inherit" });
+    if (pushResult.status !== 0) {
+      console.error("❌ git push に失敗しました。");
+      process.exit(1);
+    }
+  } catch {
+    console.log(`📤 push 中... (origin ${currentBranch} を新規作成)`);
+    const pushResult = spawnSync("git", ["push", "-u", "origin", currentBranch], {
+      stdio: "inherit",
+    });
+    if (pushResult.status !== 0) {
+      console.error("❌ git push に失敗しました。");
+      process.exit(1);
+    }
+  }
+
+  console.log(`\n✅ Push 完了!`);
+}
+
+// ── メイン ───────────────────────────────────────────────
+async function main() {
+  if (subcommand === "checkout") {
+    await mainCheckout();
+    return;
+  }
+
+  if (subcommand === "pr") {
+    await mainPR();
+    return;
+  }
+
+  if (subcommand === "push") {
+    await mainPush();
+    return;
+  }
+
+  await runCommitFlow();
 }
 
 main().catch((err) => {
