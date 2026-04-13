@@ -51,6 +51,7 @@ const subcommandArgs = args.slice(1);
 const showHelp = args.includes("--help") || args.includes("-h") || subcommand === "help";
 const setLangArg = getOptionValue(args, "--set-lang");
 const langArg = getOptionValue(subcommandArgs, "--lang");
+const noAdd = subcommandArgs.includes("--no-add");
 const CONFIG_DIR = path.join(os.homedir(), ".ai-commit");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 const defaultGroqModel = "llama-3.1-8b-instant";
@@ -78,6 +79,7 @@ Commands:
 
 Commit Options:
   --lang <ja|en>    Set language for this run
+  --no-add          Skip automatic git add .
 
 PR Options:
   --lang <ja|en>    Set language for this run
@@ -205,6 +207,13 @@ function doCommit(message) {
     });
     if (result.status !== 0) {
         console.error("Error: git commit failed");
+        process.exit(1);
+    }
+}
+function stageAllChanges() {
+    const result = (0, child_process_1.spawnSync)("git", ["add", "."], { stdio: "inherit" });
+    if (result.status !== 0) {
+        console.error("Error: git add . failed");
         process.exit(1);
     }
 }
@@ -437,6 +446,10 @@ async function main() {
     if (subcommand === "pr") {
         await mainPR();
         return;
+    }
+    if (!noAdd) {
+        console.log("📦 変更をステージしています... (git add .)");
+        stageAllChanges();
     }
     const diff = getStagedDiff();
     if (!diff.trim()) {
