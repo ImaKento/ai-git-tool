@@ -44,6 +44,17 @@ ai-commit
 ai-commit --short
 ```
 
+デフォルト言語は日本語です。
+
+```bash
+# 今回だけ英語で生成
+ai-commit --lang en
+
+# デフォルト言語を永続化
+ai-commit --set-lang en
+ai-commit --set-lang ja
+```
+
 3. 確認プロンプトで選択
 
 - `y`: そのままコミット
