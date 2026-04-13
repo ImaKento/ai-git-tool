@@ -1,12 +1,12 @@
-# ai-commit
+# ai-git
 
-Gemini API を使って、ステージ済み差分からコミットメッセージを自動生成する TypeScript 製 CLI です。
+Groq API を使って、ステージ済み差分からコミットメッセージと PR 説明文を自動生成する TypeScript 製 CLI です。
 
 ## 必要環境
 
 - Node.js `18` 以上
 - `git`
-- Gemini API キー（`GEMINI_API_KEY`）
+- Groq API キー（`GROQ_API_KEY`）
 
 ## セットアップ
 
@@ -16,17 +16,25 @@ npm run build
 npm link
 ```
 
-`npm link` 後は、どの Git リポジトリでも `ai-commit` が使えます。
+`npm link` 後は、どの Git リポジトリでも `ai-git` が使えます。
 
 ## 環境変数
 
 ```bash
-export GEMINI_API_KEY="your_api_key"
+export GROQ_API_KEY="your_api_key"
 ```
 
-API キーの取得先: [Google AI Studio](https://aistudio.google.com/apikey)
+任意でモデル指定も可能です。
+
+```bash
+export GROQ_MODEL="llama-3.1-8b-instant"
+```
+
+API キーの取得先: [Groq Console](https://console.groq.com/keys)
 
 ## 使い方
+
+### コミットメッセージ生成
 
 1. 先に変更をステージ
 
@@ -37,22 +45,18 @@ git add .
 2. コミットメッセージを生成
 
 ```bash
-# 通常（タイトル + 箇条書き本文）
-ai-commit
-
-# 短文（1行の Conventional Commits）
-ai-commit --short
+ai-git commit
 ```
 
 デフォルト言語は日本語です。
 
 ```bash
 # 今回だけ英語で生成
-ai-commit --lang en
+ai-git commit --lang en
 
 # デフォルト言語を永続化
-ai-commit --set-lang en
-ai-commit --set-lang ja
+ai-git --set-lang en
+ai-git --set-lang ja
 ```
 
 3. 確認プロンプトで選択
@@ -61,19 +65,38 @@ ai-commit --set-lang ja
 - `n`: 中止
 - `e`: エディタで編集してからコミット
 
+### PR作成
+
+1. ブランチで作業してコミット
+
+```bash
+git checkout -b feature/new-feature
+git add .
+ai-git commit
+```
+
+2. PR説明文を生成してPR作成
+
+```bash
+ai-git pr
+ai-git pr --lang en
+```
+
+`ai-git pr` は自動的に以下を実行します。
+
+- ブランチが未 push の場合 `git push -u origin <branch>`
+- ローカルに新しいコミットがある場合 `git push`
+- PR説明文を生成して PR 作成
+
 ## 開発
 
 ```bash
-# TypeScript を直接実行
 npm run dev
-
-# ビルド
 npm run build
 ```
 
 ## トラブルシューティング
 
-- `No staged changes found. Run \`git add\` first.`
-  - `git add` で差分をステージしてから実行してください。
-- `Error: GEMINI_API_KEY is not set`
-  - 環境変数 `GEMINI_API_KEY` を設定してください。
+- `No staged changes found. Run \`git add\` first.`: `git add` してから実行
+- `GROQ_API_KEY が未設定です`: `GROQ_API_KEY` を設定
+- `413 Request too large` / `TPM` 超過: `git add -p` でステージを分割
