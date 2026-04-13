@@ -1,4 +1,4 @@
-# ai-git
+# ai-git-tool
 
 Groq API を使って、ステージ済み差分からコミットメッセージと PR 説明文を自動生成する TypeScript 製 CLI です。
 
