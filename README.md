@@ -37,11 +37,22 @@ git add .
 2. コミットメッセージを生成
 
 ```bash
-# 通常（1行の Conventional Commits）
+# 通常（タイトル + 箇条書き本文）
 ai-commit
 
-# 詳細（タイトル + 箇条書き本文）
-ai-commit --detailed
+# 短文（1行の Conventional Commits）
+ai-commit --short
+```
+
+デフォルト言語は日本語です。
+
+```bash
+# 今回だけ英語で生成
+ai-commit --lang en
+
+# デフォルト言語を永続化
+ai-commit --set-lang en
+ai-commit --set-lang ja
 ```
 
 3. 確認プロンプトで選択
