@@ -2,120 +2,125 @@
 
 Groq API を使って、ステージ済み差分からコミットメッセージと PR 説明文を自動生成する TypeScript 製 CLI です。
 
-## 必要環境
-
-- Node.js `18` 以上
-- `git`
-- Groq API キー（`GROQ_API_KEY`）
-
 ## セットアップ
-
-### npm からインストール（推奨）
 
 ```bash
 npm install -g ai-git-tool
 ```
 
-### ローカル開発版をリンク
+### 環境変数
 
-```bash
-npm install
-npm run build
-npm link
-```
+API キーの取得先: [Groq Console](https://console.groq.com/keys)
 
-`npm link` 後は、どの Git リポジトリでも `ai-git` が使えます。
-
-## 環境変数
+**macOS / Linux (bash/zsh):**
 
 ```bash
 export GROQ_API_KEY="your_api_key"
 ```
 
-任意でモデル指定も可能です。
+永続化する場合は `~/.bashrc` や `~/.zshrc` に追記してください。
 
-```bash
-export GROQ_MODEL="llama-3.1-8b-instant"
+**Windows (コマンドプロンプト):**
+
+```cmd
+setx GROQ_API_KEY "your_api_key"
 ```
 
-API キーの取得先: [Groq Console](https://console.groq.com/keys)
+**Windows (PowerShell):**
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("GROQ_API_KEY", "your_api_key", "User")
+```
+
+> `setx` / `SetEnvironmentVariable` はユーザー環境変数として永続保存されます。設定後は**ターミナルを再起動**してください。
+
+**Windows (Git Bash):**
+
+```bash
+echo 'export GROQ_API_KEY="your_api_key"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+任意でモデル指定も可能です（デフォルト: `llama-3.1-8b-instant`）。
+
+```bash
+# macOS / Linux / Git Bash
+export GROQ_MODEL="llama-3.3-70b-versatile"
+
+# Windows コマンドプロンプト
+setx GROQ_MODEL "llama-3.3-70b-versatile"
+```
 
 ## 使い方
 
 ### コミットメッセージ生成
 
-1. コミットメッセージを生成
-
 ```bash
-# 通常（タイトル + 箇条書き本文）
 ai-git commit
 ```
 
-`ai-git commit` はデフォルトで `git add .` を実行してから生成します。
+デフォルトで `git add .` を実行してからコミットメッセージを生成します。
 
 ```bash
-# 自動 add を無効化（手動でステージした差分のみ使う）
+# 手動でステージした差分のみ使う
 ai-git commit --no-add
 ```
 
-デフォルト言語は日本語です。
+確認プロンプトで操作を選択できます。
 
-```bash
-# 今回だけ英語で生成
-ai-git commit --lang en
+| 入力 | 動作 |
+|------|------|
+| `y` | そのままコミット |
+| `n` | 中止 |
+| `e` | エディタで編集してからコミット |
 
-# デフォルト言語を永続化
-ai-git --set-lang en
-ai-git --set-lang ja
+**生成されるコミットメッセージの形式（Conventional Commits）:**
+
+```
+feat(auth): Google ログインを追加する
+
+- GoogleAuthProvider の設定を auth.ts に追加する
+- トークン期限切れ時の更新処理を追加する
+- ネットワーク障害時のエラーハンドリングを追加する
 ```
 
-2. 確認プロンプトで選択
-
-- `y`: そのままコミット
-- `n`: 中止
-- `e`: エディタで編集してからコミット
-
-### PR作成
-
-1. ブランチで作業してコミット
-
-```bash
-git checkout -b feature/new-feature
-git add .
-ai-git commit
-```
-
-2. PR説明文を生成してPR作成
+### PR 作成
 
 ```bash
 ai-git pr
-
-# 言語指定も可能
-ai-git pr --lang en
 ```
 
-`ai-git pr` は自動的に以下を実行します:
+自動的に以下を実行します。
 
-- ブランチがまだpushされていない場合、`git push -u origin <branch>` を実行
-- ローカルに新しいコミットがある場合、`git push` を実行
-- PR説明文を生成してPRを作成
+- ブランチがまだ push されていない場合: `git push -u origin <branch>`
+- ローカルに新しいコミットがある場合: `git push`
+- PR 説明文を生成して PR を作成
 
-3. 確認プロンプトで選択
+確認プロンプトで操作を選択できます。
 
-- `y`: PRを作成
-- `n`: 中止
-- `e`: エディタで編集してから作成
+| 入力 | 動作 |
+|------|------|
+| `y` | PR を作成 |
+| `n` | 中止 |
+| `e` | エディタで編集してから作成 |
+
+**生成される PR 説明文の形式:**
+
+```markdown
+## Summary
+変更の全体像を 2〜3 文で説明
+
+## Changes
+- 具体的な変更内容（3〜7 項目）
+
+## Test plan
+- テスト・確認方法（2〜4 項目）
+```
 
 **前提条件:**
 
 - GitHub CLI (`gh`) がインストール済み ([インストール方法](https://cli.github.com/))
 - `gh auth login` で認証済み
-
-**生成されるPR説明文のフォーマット:**
-
-- ## Summary: 変更の概要（2-3文）
-- ## Changes: 具体的な変更内容（箇条書き）
-- ## Test plan: テスト方法（箇条書き）
 
 ### ブランチ作成（自動命名）
 
@@ -127,21 +132,48 @@ ai-git checkout
 
 命名例:
 
-- `feat/auth-login-flow`
-- `fix/api-error-handling`
-- `docs/readme-update`
+```
+feat/google-login
+fix/api-error-handling
+docs/readme-update
+```
 
-推定できない場合は `feat/update-xxxxxx` のような名前を自動で使います。
+### 言語設定
+
+デフォルト言語は日本語です。
+
+```bash
+# 今回だけ英語で生成
+ai-git commit --lang en
+ai-git pr --lang en
+
+# デフォルト言語を永続化
+ai-git --set-lang en
+ai-git --set-lang ja
+```
+
+### ヘルプ
+
+```bash
+ai-git --help
+```
 
 ## 開発
 
 ```bash
-npm run dev
+npm install
 npm run build
+npm link   # どの Git リポジトリでも ai-git が使えるようになります
+```
+
+```bash
+npm run dev
 ```
 
 ## トラブルシューティング
 
-- `No staged changes found. Run \`git add\` first.`: `git add` してから実行
-- `GROQ_API_KEY が未設定です`: `GROQ_API_KEY` を設定
-- `413 Request too large` / `TPM` 超過: `git add -p` でステージを分割
+| エラー | 対処 |
+|--------|------|
+| `No staged changes found.` | `git add` してから実行 |
+| `GROQ_API_KEY が未設定です` | `GROQ_API_KEY` を設定 |
+| `413 Request too large` / TPM 超過 | `git add -p` でステージを分割 |
