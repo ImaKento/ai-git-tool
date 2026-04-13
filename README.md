@@ -41,7 +41,7 @@ echo 'export GROQ_API_KEY="your_api_key"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-任意でモデル指定も可能です（デフォルト: `llama-3.1-8b-instant`）。
+任意でモデル指定も可能です（デフォルト: `Llama 3.3 70B Versatile`）。
 
 ```bash
 # macOS / Linux / Git Bash
