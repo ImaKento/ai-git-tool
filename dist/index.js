@@ -74,6 +74,7 @@ Usage: ai-git <command> [options]
 
 Commands:
   commit            Generate commit message from staged changes
+  push              Commit with AI message and push to remote (git add . + commit + push)
   pr                Generate PR description and create pull request
   checkout          Create branch from current changes
 
@@ -95,8 +96,11 @@ Environment:
     process.exit(0);
 }
 if (!subcommand ||
-    (subcommand !== "commit" && subcommand !== "pr" && subcommand !== "checkout")) {
-    console.error("Error: Please specify a command: 'commit', 'pr' or 'checkout'");
+    (subcommand !== "commit" &&
+        subcommand !== "push" &&
+        subcommand !== "pr" &&
+        subcommand !== "checkout")) {
+    console.error("Error: Please specify a command: 'commit', 'push', 'pr' or 'checkout'");
     console.error("Run 'ai-git --help' for usage information");
     process.exit(1);
 }
@@ -489,16 +493,8 @@ function branchExists(name) {
         return false;
     }
 }
-// ── メイン ───────────────────────────────────────────────
-async function main() {
-    if (subcommand === "checkout") {
-        await mainCheckout();
-        return;
-    }
-    if (subcommand === "pr") {
-        await mainPR();
-        return;
-    }
+// ── コミットフロー共通処理 ────────────────────────────────
+async function runCommitFlow() {
     if (!noAdd) {
         console.log("📦 変更をステージしています... (git add .)");
         stageAllChanges();
@@ -511,7 +507,6 @@ async function main() {
     console.log("🤖 コミットメッセージを生成中... (compact summary input)");
     const message = await generateCommitMessage(diff);
     console.log(`\n📝 Generated commit message:\n`);
-    // 詳細モードは複数行なのでインデントして表示
     message.split("\n").forEach((line) => {
         console.log(`  ${line}`);
     });
@@ -536,6 +531,53 @@ async function main() {
     }
     doCommit(finalMessage);
     console.log(`\n✅ Committed successfully!`);
+}
+// ── push サブコマンド ─────────────────────────────────────
+async function mainPush() {
+    await runCommitFlow();
+    const currentBranch = (0, child_process_1.execSync)("git branch --show-current", {
+        encoding: "utf-8",
+    }).trim();
+    // upstream が設定済みか確認し、なければ -u origin で push
+    try {
+        (0, child_process_1.execSync)(`git rev-parse --abbrev-ref ${currentBranch}@{upstream}`, {
+            encoding: "utf-8",
+            stdio: "pipe",
+        });
+        console.log(`📤 push 中... (origin ${currentBranch})`);
+        const pushResult = (0, child_process_1.spawnSync)("git", ["push"], { stdio: "inherit" });
+        if (pushResult.status !== 0) {
+            console.error("❌ git push に失敗しました。");
+            process.exit(1);
+        }
+    }
+    catch {
+        console.log(`📤 push 中... (origin ${currentBranch} を新規作成)`);
+        const pushResult = (0, child_process_1.spawnSync)("git", ["push", "-u", "origin", currentBranch], {
+            stdio: "inherit",
+        });
+        if (pushResult.status !== 0) {
+            console.error("❌ git push に失敗しました。");
+            process.exit(1);
+        }
+    }
+    console.log(`\n✅ Push 完了!`);
+}
+// ── メイン ───────────────────────────────────────────────
+async function main() {
+    if (subcommand === "checkout") {
+        await mainCheckout();
+        return;
+    }
+    if (subcommand === "pr") {
+        await mainPR();
+        return;
+    }
+    if (subcommand === "push") {
+        await mainPush();
+        return;
+    }
+    await runCommitFlow();
 }
 main().catch((err) => {
     console.error("❌ 予期しないエラー:", err.message);
@@ -755,16 +797,24 @@ function getBranchDiff(baseBranch) {
 function buildPRPrompt(commits, diff, lang) {
     if (lang === "ja") {
         return `あなたは GitHub の Pull Request 作成の専門家です。
-次のコミット履歴と差分から、PR の説明文を生成してください。
+次のコミット履歴と差分から、PR のタイトルと説明文を生成してください。
 
-ルール:
-- GitHub の標準フォーマットを使用する
-- ## Summary: 2-3文で変更の概要を説明
+出力フォーマット（必ずこの順番で出力してください）:
+1行目: Title: <Conventional Commits 形式のタイトル（72文字以内、日本語で）>
+2行目: 空行
+3行目以降: PR 説明文（以下の形式）
+
+説明文のルール:
+- ## Summary: 1-2文で変更の概要を説明
 - ## Changes: "- " で始まる箇条書き（3-7個）で具体的な変更内容
 - ## Test plan: テスト方法の箇条書き（2-4個）
 - 命令形を使う
 - WHATとWHYを重視し、HOWは最小限に
-- 出力はPR説明文のみ（余計な説明は不要）
+- 出力はタイトルとPR説明文のみ（余計な説明は不要）
+
+タイトルの例:
+Title: feat: push サブコマンドを追加する
+Title: fix: コミットメッセージ生成のエラーハンドリングを修正する
 
 コミット履歴:
 ${commits}
@@ -773,16 +823,24 @@ ${commits}
 ${diff}`;
     }
     return `You are an expert at writing GitHub Pull Request descriptions.
-Generate a PR description from the following commit history and diff.
+Generate a PR title and description from the following commit history and diff.
 
-Rules:
-- Use standard GitHub format
-- ## Summary: 2-3 sentences explaining the overall change
+Output format (in this exact order):
+Line 1: Title: <Conventional Commits title, max 72 chars>
+Line 2: empty line
+Line 3+: PR description in the following format
+
+Description rules:
+- ## Summary: 1-2 sentences explaining the overall change
 - ## Changes: bullet points (3-7 items) with "- " prefix detailing specific changes
 - ## Test plan: bullet points (2-4 items) describing how to test
 - Use imperative mood
 - Focus on WHAT and WHY, minimize HOW
-- Output ONLY the PR description, no extra explanation
+- Output ONLY the title line and PR description, no extra explanation
+
+Title examples:
+Title: feat: add push subcommand
+Title: fix: improve error handling in commit message generation
 
 Commit history:
 ${commits}
@@ -835,45 +893,51 @@ function isRequestTooLargeError(error) {
         lower.includes("tokens per minute") ||
         lower.includes("tpm"));
 }
-function makePRTitle(description) {
-    const maxLen = 64;
-    const lines = description
+/**
+ * AI が出力した "Title: <text>" 行からタイトルを抽出する。
+ * 見つからない場合は description の先頭テキストからフォールバック。
+ */
+function extractPRTitle(raw) {
+    const firstLine = raw.split("\n")[0]?.trim() ?? "";
+    const titleMatch = /^Title:\s*(.+)$/i.exec(firstLine);
+    if (titleMatch?.[1]) {
+        return titleMatch[1].trim();
+    }
+    // フォールバック: Summary 直下の最初の文
+    const lines = raw
         .split("\n")
         .map((v) => v.trim())
         .filter(Boolean);
-    // Prefer the first sentence under ## Summary
     const summaryIdx = lines.findIndex((l) => l.toLowerCase().startsWith("## summary"));
-    let candidate = "";
-    if (summaryIdx >= 0) {
-        const summaryLine = lines
-            .slice(summaryIdx + 1)
-            .find((l) => !l.startsWith("##"));
-        candidate = summaryLine || "";
-    }
-    if (!candidate) {
-        candidate = lines.find((l) => !l.startsWith("#") && !l.startsWith("-")) || "";
-    }
+    let candidate = summaryIdx >= 0
+        ? (lines.slice(summaryIdx + 1).find((l) => !l.startsWith("##")) ?? "")
+        : (lines.find((l) => !l.startsWith("#") && !l.startsWith("-")) ?? "");
     candidate = candidate
         .replace(/^this pull request\s+(is|does)\s*/i, "")
         .replace(/^この\s*pull request\s*は、?/i, "")
         .replace(/^このprは、?/i, "")
         .replace(/\s+/g, " ")
         .trim();
-    // Trim at first sentence boundary when possible.
     const sentenceCut = candidate.search(/[。.!?]/);
     if (sentenceCut > 0) {
         candidate = candidate.slice(0, sentenceCut);
     }
-    if (!candidate) {
-        candidate = "Update project changes";
+    return candidate || "Update project changes";
+}
+/**
+ * "Title: <text>" 行を description 本文から除いて返す。
+ */
+function stripTitleLine(raw) {
+    const lines = raw.split("\n");
+    if (/^Title:\s*/i.test(lines[0]?.trim() ?? "")) {
+        // Title 行と直後の空行を除去
+        return lines.slice(lines[1]?.trim() === "" ? 2 : 1).join("\n").trimStart();
     }
-    if (candidate.length > maxLen) {
-        candidate = `${candidate.slice(0, maxLen - 1).trimEnd()}…`;
-    }
-    return candidate;
+    return raw;
 }
 function createPR(description, baseBranch, fallbackURL) {
-    const titleLine = makePRTitle(description);
+    const titleLine = extractPRTitle(description);
+    const body = stripTitleLine(description);
     const result = (0, child_process_1.spawnSync)("gh", [
         "pr",
         "create",
@@ -882,7 +946,7 @@ function createPR(description, baseBranch, fallbackURL) {
         "--title",
         titleLine.trim(),
         "--body",
-        description,
+        body,
     ], { encoding: "utf-8", stdio: "pipe" });
     if (result.stdout) {
         process.stdout.write(result.stdout);
@@ -964,8 +1028,12 @@ async function mainPR() {
     }
     console.log(`🤖 PR説明文を生成中... (${baseBranch}...${currentBranch}) [compact summary input]`);
     const description = await generatePRDescription(baseBranch);
-    console.log(`\n📝 Generated PR description:\n`);
-    description.split("\n").forEach((line) => {
+    console.log(`\n📝 Generated PR:\n`);
+    console.log(`  Title: ${extractPRTitle(description)}`);
+    console.log();
+    stripTitleLine(description)
+        .split("\n")
+        .forEach((line) => {
         console.log(`  ${line}`);
     });
     console.log();
