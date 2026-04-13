@@ -92,15 +92,83 @@ async function generateCommitMessage(diff: string): Promise<string> {
   const inputDiff = truncateByChars(diff, COMMIT_DIFF_COMPACT_CHARS);
   const prompt = buildPrompt(inputDiff, language);
   try {
-    return await generateText(prompt);
+    const raw = await generateText(prompt);
+    return normalizeGeneratedCommitMessage(raw, diff, language);
   } catch (error) {
     if (isRequestTooLargeError(error)) {
       const smallerDiff = truncateByChars(diff, 1800);
-      return generateText(buildPrompt(smallerDiff, language));
+      const retryRaw = await generateText(buildPrompt(smallerDiff, language));
+      return normalizeGeneratedCommitMessage(retryRaw, diff, language);
     }
     handleGroqError(error);
     process.exit(1);
   }
+}
+
+function normalizeGeneratedCommitMessage(
+  raw: string,
+  diff: string,
+  lang: Language,
+): string {
+  const lines = raw
+    .split("\n")
+    .map((line) => line.replace(/\s+$/g, ""))
+    .filter((_, idx, arr) => !(idx > 0 && arr[idx - 1] === "" && arr[idx] === ""));
+
+  if (lines.length === 0) {
+    return buildFallbackCommitMessage(diff, lang);
+  }
+
+  const subjectLine = lines[0]?.trim() || "";
+  const conventionalMatch = /^[a-z]+(\([^)]+\))?:\s+(.+)$/.exec(subjectLine);
+  const hasConventionalPrefix = Boolean(conventionalMatch);
+  const shortDescription = conventionalMatch?.[2]?.trim() || subjectLine;
+
+  if (
+    !hasConventionalPrefix ||
+    looksLikePathOnly(shortDescription) ||
+    shortDescription.length < 8
+  ) {
+    lines[0] = buildFallbackSubjectLine(diff, lang);
+  }
+
+  return lines.join("\n").trim();
+}
+
+function looksLikePathOnly(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  const hasPathToken = normalized.includes("/") || normalized.includes(".");
+  return hasPathToken && /^[a-z0-9/_\-.]+$/.test(normalized);
+}
+
+function buildFallbackCommitMessage(diff: string, lang: Language): string {
+  const subject = buildFallbackSubjectLine(diff, lang);
+  if (lang === "ja") {
+    return `${subject}\n\n- 差分の主目的を明確にし、変更理由が伝わる形に整える`;
+  }
+  return `${subject}\n\n- Clarify the main change intent so the reason is easy to understand`;
+}
+
+function buildFallbackSubjectLine(diff: string, lang: Language): string {
+  const files = getChangedFiles();
+  const type = inferBranchType(files, diff);
+  const rawTopic = inferTopic(files, diff);
+  const topic = rawTopic ? rawTopic.replace(/-/g, " ") : "";
+
+  if (lang === "ja") {
+    const description = topic
+      ? `${topic} の変更意図を分かりやすく整理する`
+      : "変更意図が伝わるように更新内容を整理する";
+    return `${type}: ${description}`;
+  }
+
+  const description = topic
+    ? `clarify the intent behind ${topic} changes`
+    : "clarify update intent in one clear sentence";
+  return `${type}: ${description}`;
 }
 
 function buildPrompt(diff: string, lang: Language): string {
