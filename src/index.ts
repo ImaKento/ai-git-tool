@@ -858,15 +858,60 @@ function isRequestTooLargeError(error: unknown): boolean {
   );
 }
 
+function makePRTitle(description: string): string {
+  const maxLen = 64;
+  const lines = description
+    .split("\n")
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  // Prefer the first sentence under ## Summary
+  const summaryIdx = lines.findIndex((l) =>
+    l.toLowerCase().startsWith("## summary"),
+  );
+  let candidate = "";
+
+  if (summaryIdx >= 0) {
+    const summaryLine = lines
+      .slice(summaryIdx + 1)
+      .find((l) => !l.startsWith("##"));
+    candidate = summaryLine || "";
+  }
+
+  if (!candidate) {
+    candidate = lines.find((l) => !l.startsWith("#") && !l.startsWith("-")) || "";
+  }
+
+  candidate = candidate
+    .replace(/^this pull request\s+(is|does)\s*/i, "")
+    .replace(/^この\s*pull request\s*は、?/i, "")
+    .replace(/^このprは、?/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Trim at first sentence boundary when possible.
+  const sentenceCut = candidate.search(/[。.!?]/);
+  if (sentenceCut > 0) {
+    candidate = candidate.slice(0, sentenceCut);
+  }
+
+  if (!candidate) {
+    candidate = "Update project changes";
+  }
+
+  if (candidate.length > maxLen) {
+    candidate = `${candidate.slice(0, maxLen - 1).trimEnd()}…`;
+  }
+
+  return candidate;
+}
+
 function createPR(
   description: string,
   baseBranch: string,
   fallbackURL: string | null,
 ): void {
-  // Extract title from first non-header line
-  const lines = description.split("\n");
-  const titleLine =
-    lines.find((l) => l.trim() && !l.startsWith("#")) || "Pull Request";
+  const titleLine = makePRTitle(description);
 
   const result = spawnSync(
     "gh",
