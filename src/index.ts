@@ -53,7 +53,7 @@ Global Options:
 
 Environment:
   GROQ_API_KEY     Your Groq API key (required)
-  GROQ_MODEL       Optional model name (default: llama-3.1-8b-instant)
+  GROQ_MODEL       Optional model name (default: Llama 3.3 70B Versatile)
 `);
   process.exit(0);
 }
@@ -68,7 +68,9 @@ if (
   console.error("❌ コマンドが指定されていないか、無効なコマンドです");
   console.error("");
   console.error("📚 利用可能なコマンド:");
-  console.error("   ai-git commit   - AI でコミットメッセージを生成してコミット");
+  console.error(
+    "   ai-git commit   - AI でコミットメッセージを生成してコミット",
+  );
   console.error("   ai-git push     - コミット後、リモートにプッシュ");
   console.error("   ai-git pr       - PR の説明を生成して Pull Request を作成");
   console.error("   ai-git checkout - 変更内容から新しいブランチを作成");
