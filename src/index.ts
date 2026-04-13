@@ -879,16 +879,24 @@ function getBranchDiff(baseBranch: string): { commits: string; diff: string } {
 function buildPRPrompt(commits: string, diff: string, lang: Language): string {
   if (lang === "ja") {
     return `あなたは GitHub の Pull Request 作成の専門家です。
-次のコミット履歴と差分から、PR の説明文を生成してください。
+次のコミット履歴と差分から、PR のタイトルと説明文を生成してください。
 
-ルール:
-- GitHub の標準フォーマットを使用する
-- ## Summary: 2-3文で変更の概要を説明
+出力フォーマット（必ずこの順番で出力してください）:
+1行目: Title: <Conventional Commits 形式のタイトル（72文字以内、日本語で）>
+2行目: 空行
+3行目以降: PR 説明文（以下の形式）
+
+説明文のルール:
+- ## Summary: 1-2文で変更の概要を説明
 - ## Changes: "- " で始まる箇条書き（3-7個）で具体的な変更内容
 - ## Test plan: テスト方法の箇条書き（2-4個）
 - 命令形を使う
 - WHATとWHYを重視し、HOWは最小限に
-- 出力はPR説明文のみ（余計な説明は不要）
+- 出力はタイトルとPR説明文のみ（余計な説明は不要）
+
+タイトルの例:
+Title: feat: push サブコマンドを追加する
+Title: fix: コミットメッセージ生成のエラーハンドリングを修正する
 
 コミット履歴:
 ${commits}
@@ -898,16 +906,24 @@ ${diff}`;
   }
 
   return `You are an expert at writing GitHub Pull Request descriptions.
-Generate a PR description from the following commit history and diff.
+Generate a PR title and description from the following commit history and diff.
 
-Rules:
-- Use standard GitHub format
-- ## Summary: 2-3 sentences explaining the overall change
+Output format (in this exact order):
+Line 1: Title: <Conventional Commits title, max 72 chars>
+Line 2: empty line
+Line 3+: PR description in the following format
+
+Description rules:
+- ## Summary: 1-2 sentences explaining the overall change
 - ## Changes: bullet points (3-7 items) with "- " prefix detailing specific changes
 - ## Test plan: bullet points (2-4 items) describing how to test
 - Use imperative mood
 - Focus on WHAT and WHY, minimize HOW
-- Output ONLY the PR description, no extra explanation
+- Output ONLY the title line and PR description, no extra explanation
+
+Title examples:
+Title: feat: add push subcommand
+Title: fix: improve error handling in commit message generation
 
 Commit history:
 ${commits}
@@ -975,29 +991,29 @@ function isRequestTooLargeError(error: unknown): boolean {
   );
 }
 
-function makePRTitle(description: string): string {
-  const maxLen = 64;
-  const lines = description
+/**
+ * AI が出力した "Title: <text>" 行からタイトルを抽出する。
+ * 見つからない場合は description の先頭テキストからフォールバック。
+ */
+function extractPRTitle(raw: string): string {
+  const firstLine = raw.split("\n")[0]?.trim() ?? "";
+  const titleMatch = /^Title:\s*(.+)$/i.exec(firstLine);
+  if (titleMatch?.[1]) {
+    return titleMatch[1].trim();
+  }
+
+  // フォールバック: Summary 直下の最初の文
+  const lines = raw
     .split("\n")
     .map((v) => v.trim())
     .filter(Boolean);
-
-  // Prefer the first sentence under ## Summary
   const summaryIdx = lines.findIndex((l) =>
     l.toLowerCase().startsWith("## summary"),
   );
-  let candidate = "";
-
-  if (summaryIdx >= 0) {
-    const summaryLine = lines
-      .slice(summaryIdx + 1)
-      .find((l) => !l.startsWith("##"));
-    candidate = summaryLine || "";
-  }
-
-  if (!candidate) {
-    candidate = lines.find((l) => !l.startsWith("#") && !l.startsWith("-")) || "";
-  }
+  let candidate =
+    summaryIdx >= 0
+      ? (lines.slice(summaryIdx + 1).find((l) => !l.startsWith("##")) ?? "")
+      : (lines.find((l) => !l.startsWith("#") && !l.startsWith("-")) ?? "");
 
   candidate = candidate
     .replace(/^this pull request\s+(is|does)\s*/i, "")
@@ -1006,21 +1022,24 @@ function makePRTitle(description: string): string {
     .replace(/\s+/g, " ")
     .trim();
 
-  // Trim at first sentence boundary when possible.
   const sentenceCut = candidate.search(/[。.!?]/);
   if (sentenceCut > 0) {
     candidate = candidate.slice(0, sentenceCut);
   }
 
-  if (!candidate) {
-    candidate = "Update project changes";
-  }
+  return candidate || "Update project changes";
+}
 
-  if (candidate.length > maxLen) {
-    candidate = `${candidate.slice(0, maxLen - 1).trimEnd()}…`;
+/**
+ * "Title: <text>" 行を description 本文から除いて返す。
+ */
+function stripTitleLine(raw: string): string {
+  const lines = raw.split("\n");
+  if (/^Title:\s*/i.test(lines[0]?.trim() ?? "")) {
+    // Title 行と直後の空行を除去
+    return lines.slice(lines[1]?.trim() === "" ? 2 : 1).join("\n").trimStart();
   }
-
-  return candidate;
+  return raw;
 }
 
 function createPR(
@@ -1028,7 +1047,8 @@ function createPR(
   baseBranch: string,
   fallbackURL: string | null,
 ): void {
-  const titleLine = makePRTitle(description);
+  const titleLine = extractPRTitle(description);
+  const body = stripTitleLine(description);
 
   const result = spawnSync(
     "gh",
@@ -1040,7 +1060,7 @@ function createPR(
       "--title",
       titleLine.trim(),
       "--body",
-      description,
+      body,
     ],
     { encoding: "utf-8", stdio: "pipe" },
   );
@@ -1140,10 +1160,14 @@ async function mainPR() {
 
   const description = await generatePRDescription(baseBranch);
 
-  console.log(`\n📝 Generated PR description:\n`);
-  description.split("\n").forEach((line) => {
-    console.log(`  ${line}`);
-  });
+  console.log(`\n📝 Generated PR:\n`);
+  console.log(`  Title: ${extractPRTitle(description)}`);
+  console.log();
+  stripTitleLine(description)
+    .split("\n")
+    .forEach((line) => {
+      console.log(`  ${line}`);
+    });
   console.log();
 
   const answer = await askUser(
