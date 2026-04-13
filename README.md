@@ -1,16 +1,16 @@
-# ai-git-tool
+ai-git-tool
 
-Groq API を使って、ステージ済み差分からコミットメッセージと PR 説明文を自動生成する TypeScript 製 CLI です。
+A TypeScript CLI that uses the Groq API to automatically generate commit messages and PR descriptions from staged diffs.
 
-## セットアップ
+## Setup
 
 ```bash
 npm install -g ai-git-tool
 ```
 
-### 環境変数
+### Environment Variables
 
-API キーの取得先: [Groq Console](https://console.groq.com/keys)
+Get your API key from: [Groq Console](https://console.groq.com/keys)
 
 **macOS / Linux (bash/zsh):**
 
@@ -18,9 +18,9 @@ API キーの取得先: [Groq Console](https://console.groq.com/keys)
 export GROQ_API_KEY="your_api_key"
 ```
 
-永続化する場合は `~/.bashrc` や `~/.zshrc` に追記してください。
+To persist it, add the line to your `~/.bashrc` or `~/.zshrc`.
 
-**Windows (コマンドプロンプト):**
+**Windows (Command Prompt):**
 
 ```cmd
 setx GROQ_API_KEY "your_api_key"
@@ -32,7 +32,7 @@ setx GROQ_API_KEY "your_api_key"
 [System.Environment]::SetEnvironmentVariable("GROQ_API_KEY", "your_api_key", "User")
 ```
 
-> `setx` / `SetEnvironmentVariable` はユーザー環境変数として永続保存されます。設定後は**ターミナルを再起動**してください。
+> `setx` / `SetEnvironmentVariable` saves the value as a persistent user environment variable. Restart your terminal after setting it.
 
 **Windows (Git Bash):**
 
@@ -41,123 +41,123 @@ echo 'export GROQ_API_KEY="your_api_key"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-任意でモデル指定も可能です（デフォルト: `Llama 3.3 70B Versatile`）。
+You can also set the model (default: `Llama 3.3 70B Versatile`).
 
 ```bash
 # macOS / Linux / Git Bash
 export GROQ_MODEL="llama-3.3-70b-versatile"
 
-# Windows コマンドプロンプト
+# Windows Command Prompt
 setx GROQ_MODEL "llama-3.3-70b-versatile"
 ```
 
-## 使い方
+## Usage
 
-### コミットメッセージ生成
+### Generate Commit Message
 
 ```bash
 ai-git commit
 ```
 
-デフォルトで `git add .` を実行してからコミットメッセージを生成します。
+By default, it runs `git add .` and then generates a commit message.
 
 ```bash
-# 手動でステージした差分のみ使う
+# Use only manually staged changes
 ai-git commit --no-add
 ```
 
-確認プロンプトで操作を選択できます。
+You can choose an action in the confirmation prompt.
 
-| 入力 | 動作                           |
-| ---- | ------------------------------ |
-| `y`  | そのままコミット               |
-| `n`  | 中止                           |
-| `e`  | エディタで編集してからコミット |
+| Input | Action                           |
+| ----- | -------------------------------- |
+| `y`   | Commit as-is                     |
+| `n`   | Cancel                           |
+| `e`   | Edit in your editor, then commit |
 
-**生成されるコミットメッセージの形式（Conventional Commits）:**
+**Generated commit message format (Conventional Commits):**
 
 ```
-feat(auth): Google ログインを追加する
+feat(auth): add Google login
 
-- GoogleAuthProvider の設定を auth.ts に追加する
-- トークン期限切れ時の更新処理を追加する
-- ネットワーク障害時のエラーハンドリングを追加する
+- add GoogleAuthProvider configuration to auth.ts
+- add token refresh handling for expired tokens
+- add error handling for network failures
 ```
 
-### コミット & プッシュ
+### Commit and Push
 
 ```bash
 ai-git push
 ```
 
-`git add .` → AI によるコミットメッセージ生成 → コミット → `git push` を一括で実行します。
+Runs everything in one flow: `git add .` -> AI commit message generation -> commit -> `git push`.
 
-- upstream が未設定の場合は `git push -u origin <branch>` で自動設定
-- PR は作成しません（PR を作りたい場合は `ai-git pr` を使用）
+- If upstream is not set, it automatically runs `git push -u origin <branch>`
+- Does not create a PR (use `ai-git pr` if you want to create one)
 
-確認プロンプトで操作を選択できます。
+You can choose an action in the confirmation prompt.
 
-| 入力 | 動作                                      |
-| ---- | ----------------------------------------- |
-| `y`  | そのままコミット & プッシュ               |
-| `n`  | 中止                                      |
-| `e`  | エディタで編集してからコミット & プッシュ |
+| Input | Action                                    |
+| ----- | ----------------------------------------- |
+| `y`   | Commit and push as-is                     |
+| `n`   | Cancel                                    |
+| `e`   | Edit in your editor, then commit and push |
 
 ```bash
-# ステージ済みの差分のみ使う
+# Use only staged changes
 ai-git push --no-add
 ```
 
-### PR 作成
+### Create PR
 
 ```bash
 ai-git pr
 ```
 
-自動的に以下を実行します。
+It automatically performs the following:
 
-- ブランチがまだ push されていない場合: `git push -u origin <branch>`
-- ローカルに新しいコミットがある場合: `git push`
-- PR 説明文を生成して PR を作成
+- If the branch has not been pushed yet: `git push -u origin <branch>`
+- If there are new local commits: `git push`
+- Generates a PR description and creates the PR
 
-確認プロンプトで操作を選択できます。
+You can choose an action in the confirmation prompt.
 
-| 入力 | 動作                       |
-| ---- | -------------------------- |
-| `y`  | PR を作成                  |
-| `n`  | 中止                       |
-| `e`  | エディタで編集してから作成 |
+| Input | Action                              |
+| ----- | ----------------------------------- |
+| `y`   | Create PR                           |
+| `n`   | Cancel                              |
+| `e`   | Edit in your editor, then create PR |
 
-**生成される PR 説明文の形式:**
+**Generated PR description format:**
 
 ```markdown
 ## Summary
 
-変更の全体像を 1〜2 文で説明
+Describe the overall change in 1-2 sentences
 
 ## Changes
 
-- 具体的な変更内容（3〜7 項目）
+- Specific changes (3-7 items)
 
 ## Test plan
 
-- テスト・確認方法（2〜4 項目）
+- How to test/verify (2-4 items)
 ```
 
-**前提条件:**
+**Prerequisites:**
 
-- GitHub CLI (`gh`) がインストール済み ([インストール方法](https://cli.github.com/))
-- `gh auth login` で認証済み
+- GitHub CLI (`gh`) is installed ([install guide](https://cli.github.com/))
+- Authenticated with `gh auth login`
 
-### ブランチ作成（自動命名）
+### Create Branch (Auto Naming)
 
-変更差分（ステージ済み + 未ステージ）からブランチ名を推定して作成します。
+Generates and creates a branch name from your diffs (staged + unstaged).
 
 ```bash
 ai-git checkout
 ```
 
-命名例:
+Naming examples:
 
 ```
 feat/google-login
@@ -165,88 +165,88 @@ fix/api-error-handling
 docs/readme-update
 ```
 
-### 言語設定
+### Language Settings
 
-デフォルト言語は日本語です。
+The default language is Japanese.
 
 ```bash
-# 今回だけ英語で生成
+# Generate in English for this run only
 ai-git commit --lang en
 ai-git pr --lang en
 
-# デフォルト言語を永続化
+# Persist default language
 ai-git --set-lang en
 ai-git --set-lang ja
 ```
 
-### ヘルプ
+### Help
 
 ```bash
 ai-git --help
 ```
 
-## 開発
+## Development
 
 ```bash
 npm install
 npm run build
-npm link   # どの Git リポジトリでも ai-git が使えるようになります
+npm link   # Makes ai-git available in any Git repository
 ```
 
 ```bash
 npm run dev
 ```
 
-## トラブルシューティング
+## Troubleshooting
 
-### エラーメッセージについて
+### About Error Messages
 
-ai-git は Git 初心者にも優しいエラーメッセージを表示します。エラーが発生した場合、以下の情報が表示されます：
+ai-git shows beginner-friendly error messages for Git users. When an error happens, it explains:
 
-- **何が起こったか**（エラーの内容）
-- **なぜ起こったか**（原因）
-- **どうすればいいか**（解決方法）
-- **ai-git のどのコマンドが使えるか**（次のステップ）
+- **What happened** (error details)
+- **Why it happened** (root cause)
+- **How to fix it** (solution)
+- **Which ai-git command to run next** (next step)
 
-### よくあるエラーと対処法
+### Common Errors and Fixes
 
-| エラー                                         | 原因                                       | 対処                                                                    |
-| ---------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
-| `ステージされた変更が見つかりません`           | コミットする変更がステージングエリアにない | `git add .` でステージ、または `ai-git push` を使用                     |
-| `GROQ_API_KEY が未設定です`                    | AI 機能に必要な API キーが設定されていない | [Groq Console](https://console.groq.com/keys) で API キーを取得して設定 |
-| `これは Git リポジトリではありません`          | Git が初期化されていないディレクトリで実行 | `git init` で初期化、または Git リポジトリに移動                        |
-| `GitHub CLI (gh) がインストールされていません` | PR 作成に必要な gh コマンドがない          | [GitHub CLI](https://cli.github.com/) をインストール                    |
-| `GitHub CLI の認証が必要です`                  | GitHub にログインしていない                | `gh auth login` で認証                                                  |
-| `ベースブランチを検出できませんでした`         | main/master/develop ブランチが存在しない   | リモートから取得: `git fetch origin`                                    |
-| `413 Request too large` / TPM 超過             | 差分が大きすぎる、またはレート制限         | 自動で縮小して再試行されます。それでも失敗する場合は少し待つ            |
+| Error                                        | Cause                                            | Fix                                                                         |
+| -------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------- |
+| `No staged changes found`                    | Nothing to commit is in the staging area         | Stage with `git add .`, or use `ai-git push`                                |
+| `GROQ_API_KEY is not set`                    | API key required for AI features is missing      | Get and set your API key from [Groq Console](https://console.groq.com/keys) |
+| `This is not a Git repository`               | Running in a directory without Git initialized   | Run `git init`, or move to a Git repository                                 |
+| `GitHub CLI (gh) is not installed`           | `gh` command required for PR creation is missing | Install [GitHub CLI](https://cli.github.com/)                               |
+| `GitHub CLI authentication is required`      | Not logged in to GitHub with `gh`                | Authenticate with `gh auth login`                                           |
+| `Could not detect base branch`               | `main`/`master`/`develop` does not exist         | Fetch remotes: `git fetch origin`                                           |
+| `413 Request too large` / TPM limit exceeded | Diff is too large, or rate limit exceeded        | It retries with a reduced payload; if it still fails, wait and retry        |
 
-### Git の基本操作
+### Basic Git Commands
 
-ai-git を使う前に、以下の Git コマンドを覚えておくと便利です：
+Before using ai-git, it is helpful to know these basic Git commands:
 
 ```bash
-# 現在の状態を確認
+# Check current status
 git status
 
-# 変更をステージング
-git add <ファイル名>    # 特定のファイルだけ
-git add .              # すべての変更
+# Stage changes
+git add <filename>    # Specific file only
+git add .             # All changes
 
-# コミット履歴を確認
+# Check commit history
 git log --oneline
 
-# ブランチの確認
+# Check branches
 git branch -a
 
-# リモートの確認
+# Check remotes
 git remote -v
 ```
 
-### 推奨ワークフロー
+### Recommended Workflow
 
-Git 初心者の方は、以下の流れで使うのがおすすめです：
+If you are new to Git, this flow works well:
 
-1. **変更を加える** - ファイルを編集
-2. **状態を確認** - `git status` で変更を確認
-3. **コミット** - `ai-git commit` または `ai-git push`
-4. **PR 作成** - `ai-git pr`（必要に応じて）
+1. **Make changes** - Edit files
+2. **Check status** - Review changes with `git status`
+3. **Commit** - Run `ai-git commit` or `ai-git push`
+4. **Create PR** - Run `ai-git pr` when needed
