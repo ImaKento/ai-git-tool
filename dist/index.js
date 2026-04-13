@@ -100,22 +100,81 @@ if (!subcommand ||
         subcommand !== "push" &&
         subcommand !== "pr" &&
         subcommand !== "checkout")) {
-    console.error("Error: Please specify a command: 'commit', 'push', 'pr' or 'checkout'");
-    console.error("Run 'ai-git --help' for usage information");
+    console.error("❌ コマンドが指定されていないか、無効なコマンドです");
+    console.error("");
+    console.error("📚 利用可能なコマンド:");
+    console.error("   ai-git commit   - AI でコミットメッセージを生成してコミット");
+    console.error("   ai-git push     - コミット後、リモートにプッシュ");
+    console.error("   ai-git pr       - PR の説明を生成して Pull Request を作成");
+    console.error("   ai-git checkout - 変更内容から新しいブランチを作成");
+    console.error("");
+    console.error("💡 詳しい使い方:");
+    console.error("   ai-git --help");
+    console.error("");
+    console.error("🎯 最初に試すなら:");
+    console.error("   ai-git commit   (変更をコミット)");
+    console.error("   ai-git push     (コミット＆プッシュを一度に実行)");
     process.exit(1);
 }
 const language = resolveLanguage(langArg);
+// ── エラーヘルパー関数 ────────────────────────────────────
+/**
+ * Git リポジトリかどうかを確認
+ */
+function checkIfGitRepository() {
+    try {
+        (0, child_process_1.execSync)("git rev-parse --git-dir", { stdio: "pipe" });
+    }
+    catch {
+        console.error("❌ これは Git リポジトリではありません。");
+        console.error("");
+        console.error("💡 次の手順を試してください:");
+        console.error("   1. Git リポジトリを初期化する:");
+        console.error("      git init");
+        console.error("   2. または、既存のリポジトリに移動する:");
+        console.error("      cd /path/to/your/repository");
+        process.exit(1);
+    }
+}
+/**
+ * 親切なエラーメッセージを表示
+ */
+function showFriendlyError(title, reason, solutions, nextSteps) {
+    console.error(`❌ ${title}`);
+    console.error("");
+    console.error(`📋 原因: ${reason}`);
+    console.error("");
+    console.error("💡 解決方法:");
+    solutions.forEach((solution, idx) => {
+        console.error(`   ${idx + 1}. ${solution}`);
+    });
+    if (nextSteps && nextSteps.length > 0) {
+        console.error("");
+        console.error("🚀 その後、以下のコマンドが使えます:");
+        nextSteps.forEach((step) => {
+            console.error(`   - ${step}`);
+        });
+    }
+}
 // ── git diff 取得 ────────────────────────────────────────
 function getStagedDiff() {
+    checkIfGitRepository();
     try {
         return (0, child_process_1.execSync)("git diff --cached", { encoding: "utf-8" });
     }
     catch {
-        console.error("Error: Failed to run git diff --cached");
+        showFriendlyError("Git の差分取得に失敗しました", "git diff コマンドの実行に失敗しました", [
+            "Git がインストールされているか確認してください: git --version",
+            "カレントディレクトリが Git リポジトリか確認してください: git status",
+        ], ["ai-git commit で変更をコミット", "ai-git checkout で新しいブランチを作成"]);
         process.exit(1);
     }
 }
-// ── Groq APIでコミットメッセージ生成 ───────────────────
+// ── AI によるメッセージ生成 ───────────────────────────────
+/**
+ * git diff から AI を使ってコミットメッセージを生成
+ * リクエストが大きすぎる場合は自動的に縮小して再試行
+ */
 async function generateCommitMessage(diff) {
     const inputDiff = truncateByChars(diff, COMMIT_DIFF_COMPACT_CHARS);
     const prompt = buildPrompt(inputDiff, language);
@@ -133,6 +192,10 @@ async function generateCommitMessage(diff) {
         process.exit(1);
     }
 }
+/**
+ * AI が生成したコミットメッセージを検証・正規化
+ * 不適切な内容の場合はフォールバックメッセージを使用
+ */
 function normalizeGeneratedCommitMessage(raw, diff, lang) {
     const lines = raw
         .split("\n")
@@ -183,18 +246,28 @@ function buildFallbackSubjectLine(diff, lang) {
         : "clarify update intent in one clear sentence";
     return `${type}: ${description}`;
 }
+/**
+ * コミットメッセージ生成用のプロンプトを構築
+ * 言語に応じて日本語または英語のプロンプトを返す
+ */
 function buildPrompt(diff, lang) {
     if (lang === "ja") {
         return `あなたは git のコミットメッセージ作成の専門家です。
-次の git diff から、Conventional Commits 形式の詳細コミットメッセージを生成してください。
+次の git diff を注意深く分析し、Conventional Commits 形式の詳細コミットメッセージを生成してください。
+
+重要: diff の内容を正確に読み取り、実際に何が変更されたかを理解してください。
+変更されたファイル名、追加/削除された関数名、変更の目的を特定してください。
 
 ルール:
 - 1行目: <type>(<optional scope>): <short description>（72文字以内）
+  * type は実際の変更内容に基づいて選択（feat, fix, docs, refactor, test, chore など）
+  * scope は変更の影響範囲（例: error-handling, ui, api）
 - 2行目は空行
 - 本文は "- " で始まる箇条書き
-- 箇条書きは 3-5 行
-- WHAT と WHY を書き、HOW は書かない
-- 命令形を使う
+- 箇条書きは 3-5 行で、具体的な変更内容を記述
+- WHAT（何を変更したか）と WHY（なぜ変更したか）を書く
+- HOW（どうやって実装したか）は書かない
+- 命令形を使う（「追加する」「修正する」など）
 - 出力はコミットメッセージ本文のみ（説明文は不要）
 - 説明文は日本語にする
 
@@ -209,13 +282,19 @@ Git diff:
 ${diff}`;
     }
     return `You are an expert at writing git commit messages.
-Generate a detailed commit message in Conventional Commits format for the following git diff.
+Carefully analyze the following git diff and generate a detailed commit message in Conventional Commits format.
+
+IMPORTANT: Read the diff content accurately and understand what was actually changed.
+Identify changed file names, added/removed function names, and the purpose of the changes.
 
 Rules:
 - First line: <type>(<optional scope>): <short description> (max 72 chars)
+  * Choose type based on actual changes (feat, fix, docs, refactor, test, chore, etc.)
+  * Scope should reflect the area of impact (e.g., error-handling, ui, api)
 - Blank line after the first line
-- Body: bullet points starting with "- " explaining WHAT and WHY
-- 3-5 bullet points max
+- Body: bullet points starting with "- " describing specific changes
+- 3-5 bullet points explaining WHAT was changed and WHY
+- Do NOT explain HOW it was implemented
 - Use imperative mood ("add" not "added")
 - Output ONLY the commit message, nothing else
 
@@ -256,23 +335,86 @@ function editInEditor(message) {
     fs.unlinkSync(tmpFile);
     return edited;
 }
+// ── Git 基本操作 ──────────────────────────────────────────
+/**
+ * 現在のブランチをリモートにプッシュ
+ * upstream が未設定の場合は自動で設定
+ */
+function pushCurrentBranch(currentBranch) {
+    try {
+        // upstream が設定済みか確認
+        (0, child_process_1.execSync)(`git rev-parse --abbrev-ref ${currentBranch}@{upstream}`, {
+            encoding: "utf-8",
+            stdio: "pipe",
+        });
+        console.log(`📤 push 中... (origin ${currentBranch})`);
+        const pushResult = (0, child_process_1.spawnSync)("git", ["push"], { stdio: "inherit" });
+        if (pushResult.status !== 0) {
+            showFriendlyError("プッシュに失敗しました", "リモートへのプッシュが失敗しました（権限不足やネットワークエラーの可能性があります）", [
+                "リモートリポジトリの設定を確認: git remote -v",
+                "プッシュ権限があるか確認してください",
+                "ネットワーク接続を確認してください",
+                "リモートブランチとの競合がないか確認: git pull",
+            ], [
+                "競合を解決後に ai-git push を再実行",
+                "ai-git pr で Pull Request を作成（プッシュ済みの場合）",
+            ]);
+            process.exit(1);
+        }
+    }
+    catch {
+        // upstream が存在しない場合、新規 push
+        console.log(`📤 push 中... (origin ${currentBranch} を新規作成)`);
+        const pushResult = (0, child_process_1.spawnSync)("git", ["push", "-u", "origin", currentBranch], {
+            stdio: "inherit",
+        });
+        if (pushResult.status !== 0) {
+            showFriendlyError("新しいブランチのプッシュに失敗しました", "リモートに新しいブランチを作成できませんでした（権限不足やネットワークエラーの可能性があります）", [
+                "リモートリポジトリの URL を確認: git remote -v",
+                "リモートリポジトリへのプッシュ権限があるか確認",
+                "ネットワーク接続を確認してください",
+                "SSH キーまたは認証情報が正しく設定されているか確認",
+            ], [
+                "権限を確認後に ai-git push を再実行",
+                "手動でプッシュ: git push -u origin " + currentBranch,
+            ]);
+            process.exit(1);
+        }
+    }
+}
 // ── git commit 実行 ──────────────────────────────────────
 function doCommit(message) {
     const result = (0, child_process_1.spawnSync)("git", ["commit", "-m", message], {
         stdio: "inherit",
     });
     if (result.status !== 0) {
-        console.error("Error: git commit failed");
+        showFriendlyError("コミットに失敗しました", "git commit コマンドが失敗しました（pre-commit フックのエラーや空のコミットの可能性があります）", [
+            "ステージされたファイルを確認: git status",
+            "pre-commit フックがある場合は、エラー内容を確認してください",
+            "空のコミットを許可する場合: git commit --allow-empty -m 'メッセージ'",
+        ], ["エラーを修正後に ai-git commit を再実行"]);
         process.exit(1);
     }
 }
 function stageAllChanges() {
     const result = (0, child_process_1.spawnSync)("git", ["add", "."], { stdio: "inherit" });
     if (result.status !== 0) {
-        console.error("Error: git add . failed");
+        showFriendlyError("ファイルのステージングに失敗しました", "git add . コマンドが失敗しました", [
+            "カレントディレクトリを確認: pwd",
+            "Git の状態を確認: git status",
+            ".gitignore で除外されているファイルがないか確認",
+            "ファイルのパーミッションを確認してください",
+        ], [
+            "ai-git commit --no-add (手動で git add する場合)",
+            "特定のファイルだけ追加: git add <ファイル名>",
+        ]);
         process.exit(1);
     }
 }
+/**
+ * checkout サブコマンドのメイン処理
+ * 変更内容から適切なブランチ名を AI で提案し、新しいブランチを作成
+ */
 async function mainCheckout() {
     const suggested = await suggestBranchName();
     const branchName = ensureAvailableBranchName(suggested);
@@ -280,11 +422,23 @@ async function mainCheckout() {
         stdio: "inherit",
     });
     if (result.status !== 0) {
-        console.error("❌ ブランチ作成に失敗しました。");
+        showFriendlyError("ブランチ作成に失敗しました", "git checkout -b コマンドが失敗しました（未コミットの変更がある可能性があります）", [
+            "現在の変更を確認: git status",
+            "変更をコミットしてから新しいブランチを作成する",
+            "変更を一時退避: git stash",
+            "または、変更を含めたままブランチを作成: git checkout -b <ブランチ名>",
+        ], [
+            "ai-git commit でまず変更をコミット",
+            "ai-git push でコミット＆プッシュしてから新しいブランチを作成",
+        ]);
         process.exit(1);
     }
     console.log(`✅ ブランチを作成しました: ${branchName}`);
 }
+/**
+ * 変更内容からブランチ名を提案
+ * AI が利用可能な場合は AI を使用、そうでない場合はヒューリスティックで生成
+ */
 async function suggestBranchName() {
     const files = getChangedFiles();
     const diff = getCombinedDiff();
@@ -494,6 +648,13 @@ function branchExists(name) {
     }
 }
 // ── コミットフロー共通処理 ────────────────────────────────
+/**
+ * コミットの基本フロー
+ * 1. 変更をステージ（--no-add が指定されていない場合）
+ * 2. AI でコミットメッセージを生成
+ * 3. ユーザーに確認を求める
+ * 4. 承認されたらコミットを実行
+ */
 async function runCommitFlow() {
     if (!noAdd) {
         console.log("📦 変更をステージしています... (git add .)");
@@ -501,7 +662,14 @@ async function runCommitFlow() {
     }
     const diff = getStagedDiff();
     if (!diff.trim()) {
-        console.log("No staged changes found. Run `git add` first.");
+        showFriendlyError("ステージされた変更が見つかりません", "コミットする変更がステージングエリアにありません", [
+            "変更したファイルを確認: git status",
+            "すべての変更をステージ: git add .",
+            "特定のファイルだけステージ: git add <ファイル名>",
+        ], [
+            "ai-git commit --no-add (手動で git add した後)",
+            "ai-git push (自動で git add してコミット＆プッシュ)",
+        ]);
         process.exit(1);
     }
     console.log("🤖 コミットメッセージを生成中... (compact summary input)");
@@ -533,34 +701,16 @@ async function runCommitFlow() {
     console.log(`\n✅ Committed successfully!`);
 }
 // ── push サブコマンド ─────────────────────────────────────
+/**
+ * push サブコマンドのメイン処理
+ * コミットフローを実行後、リモートにプッシュ
+ */
 async function mainPush() {
     await runCommitFlow();
     const currentBranch = (0, child_process_1.execSync)("git branch --show-current", {
         encoding: "utf-8",
     }).trim();
-    // upstream が設定済みか確認し、なければ -u origin で push
-    try {
-        (0, child_process_1.execSync)(`git rev-parse --abbrev-ref ${currentBranch}@{upstream}`, {
-            encoding: "utf-8",
-            stdio: "pipe",
-        });
-        console.log(`📤 push 中... (origin ${currentBranch})`);
-        const pushResult = (0, child_process_1.spawnSync)("git", ["push"], { stdio: "inherit" });
-        if (pushResult.status !== 0) {
-            console.error("❌ git push に失敗しました。");
-            process.exit(1);
-        }
-    }
-    catch {
-        console.log(`📤 push 中... (origin ${currentBranch} を新規作成)`);
-        const pushResult = (0, child_process_1.spawnSync)("git", ["push", "-u", "origin", currentBranch], {
-            stdio: "inherit",
-        });
-        if (pushResult.status !== 0) {
-            console.error("❌ git push に失敗しました。");
-            process.exit(1);
-        }
-    }
+    pushCurrentBranch(currentBranch);
     console.log(`\n✅ Push 完了!`);
 }
 // ── メイン ───────────────────────────────────────────────
@@ -635,8 +785,16 @@ function saveConfig(config) {
 function getGroqClient() {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
-        console.error("❌ GROQ_API_KEY が未設定です。");
-        console.error('   取得先: https://console.groq.com/keys\n   例: export GROQ_API_KEY="your_api_key"');
+        showFriendlyError("GROQ_API_KEY が未設定です", "AI 機能を使用するには Groq API キーが必要です", [
+            "Groq にサインアップ（無料）: https://console.groq.com/",
+            "API キーを取得: https://console.groq.com/keys",
+            "環境変数に設定:",
+            '  - 一時的: export GROQ_API_KEY="gsk_..."',
+            '  - 永続的: ~/.bashrc や ~/.zshrc に上記を追加',
+        ], [
+            "API キー設定後に ai-git commit を実行",
+            "API キー設定後に ai-git pr を実行",
+        ]);
         process.exit(1);
     }
     return new openai_1.default({
@@ -683,12 +841,26 @@ function checkGHCLI() {
     }
     catch {
         if (language === "ja") {
-            console.error("❌ GitHub CLI (gh) がインストールされていません。");
-            console.error("   インストール: https://cli.github.com/");
+            showFriendlyError("GitHub CLI (gh) がインストールされていません", "PR を作成するには GitHub CLI が必要です", [
+                "GitHub CLI をインストール: https://cli.github.com/",
+                "macOS: brew install gh",
+                "Windows: winget install GitHub.cli",
+                "Linux: 上記サイトから手順を確認",
+            ], [
+                "インストール後に ai-git pr を実行",
+                "または、手動で GitHub のウェブサイトから PR を作成",
+            ]);
         }
         else {
-            console.error("❌ GitHub CLI (gh) is not installed.");
-            console.error("   Install from: https://cli.github.com/");
+            showFriendlyError("GitHub CLI (gh) is not installed", "GitHub CLI is required to create pull requests", [
+                "Install GitHub CLI: https://cli.github.com/",
+                "macOS: brew install gh",
+                "Windows: winget install GitHub.cli",
+                "Linux: see the website above for instructions",
+            ], [
+                "Run ai-git pr after installation",
+                "Or create PR manually on GitHub website",
+            ]);
         }
         process.exit(1);
     }
@@ -702,14 +874,26 @@ function checkGHAuth() {
     }
     catch {
         if (language === "ja") {
-            console.error("❌ GitHub CLI の認証が必要です。");
-            console.error("   次を実行してください: gh auth login");
-            console.error("   もしくは GH_TOKEN を環境変数に設定してください。");
+            showFriendlyError("GitHub CLI の認証が必要です", "GitHub にログインしていないため、PR を作成できません", [
+                "対話式でログイン: gh auth login",
+                "ブラウザが開くので、指示に従ってログインしてください",
+                "または、Personal Access Token を使用: export GH_TOKEN=<your_token>",
+                "Token 作成: https://github.com/settings/tokens",
+            ], [
+                "ログイン後に ai-git pr を実行",
+                "ai-git commit でまずローカルにコミット（PR は後で作成）",
+            ]);
         }
         else {
-            console.error("❌ GitHub CLI authentication is required.");
-            console.error("   Run: gh auth login");
-            console.error("   Or set GH_TOKEN environment variable.");
+            showFriendlyError("GitHub CLI authentication is required", "You need to log in to GitHub to create pull requests", [
+                "Interactive login: gh auth login",
+                "Follow the browser instructions to log in",
+                "Or use Personal Access Token: export GH_TOKEN=<your_token>",
+                "Create token: https://github.com/settings/tokens",
+            ], [
+                "Run ai-git pr after logging in",
+                "Use ai-git commit to commit locally first (create PR later)",
+            ]);
         }
         process.exit(1);
     }
@@ -767,12 +951,26 @@ function detectBaseBranch() {
     }
     // Error: No base branch found
     if (language === "ja") {
-        console.error("❌ ベースブランチを検出できませんでした。");
-        console.error("   main, master, develop のいずれも存在しません。");
+        showFriendlyError("ベースブランチを検出できませんでした", "main, master, develop のいずれも存在しません", [
+            "リポジトリのデフォルトブランチを確認: git branch -a",
+            "ベースブランチを作成: git checkout -b main",
+            "リモートからブランチを取得: git fetch origin",
+            "リモートのデフォルトブランチを設定: git remote set-head origin --auto",
+        ], [
+            "ベースブランチ作成後に ai-git pr を実行",
+            "ai-git commit で現在のブランチにコミット",
+        ]);
     }
     else {
-        console.error("❌ Could not detect base branch.");
-        console.error("   None of main, master, develop exist.");
+        showFriendlyError("Could not detect base branch", "None of main, master, develop exist", [
+            "Check repository branches: git branch -a",
+            "Create base branch: git checkout -b main",
+            "Fetch branches from remote: git fetch origin",
+            "Set remote default branch: git remote set-head origin --auto",
+        ], [
+            "Run ai-git pr after creating base branch",
+            "Use ai-git commit to commit to current branch",
+        ]);
     }
     process.exit(1);
 }
@@ -786,10 +984,26 @@ function getBranchDiff(baseBranch) {
     }
     catch {
         if (language === "ja") {
-            console.error("❌ ブランチの差分取得に失敗しました。");
+            showFriendlyError("ブランチの差分取得に失敗しました", `${baseBranch} ブランチとの差分を取得できませんでした`, [
+                "ブランチの状態を確認: git log --oneline",
+                `ベースブランチ (${baseBranch}) が存在するか確認: git branch -a`,
+                "リモートから最新を取得: git fetch origin",
+                "コミットがあるか確認: git log",
+            ], [
+                "コミットがない場合は ai-git commit でまずコミット",
+                "ブランチが存在しない場合は ai-git checkout で作成",
+            ]);
         }
         else {
-            console.error("❌ Failed to get branch diff.");
+            showFriendlyError("Failed to get branch diff", `Could not get diff with ${baseBranch} branch`, [
+                "Check branch status: git log --oneline",
+                `Check if base branch (${baseBranch}) exists: git branch -a`,
+                "Fetch latest from remote: git fetch origin",
+                "Check if there are commits: git log",
+            ], [
+                "Use ai-git commit to create commits first",
+                "Use ai-git checkout to create a new branch",
+            ]);
         }
         process.exit(1);
     }
@@ -848,6 +1062,10 @@ ${commits}
 Diff:
 ${diff}`;
 }
+/**
+ * ベースブランチとの差分から PR の説明文を AI で生成
+ * コミット履歴と diff を分析して、適切なタイトルと本文を作成
+ */
 async function generatePRDescription(baseBranch) {
     const { commits, diff } = getBranchDiff(baseBranch);
     const inputCommits = truncateByChars(commits, PR_COMMITS_COMPACT_CHARS);
@@ -956,20 +1174,46 @@ function createPR(description, baseBranch, fallbackURL) {
     }
     if (result.status !== 0) {
         if (language === "ja") {
-            console.error("❌ PR の作成に失敗しました。");
+            const solutions = [
+                "ブランチがプッシュされているか確認: git log origin/$(git branch --show-current)",
+                "GitHub への接続を確認してください",
+                "gh auth status で認証状態を確認",
+                "同名の PR が既に存在しないか GitHub で確認",
+            ];
             if (fallbackURL) {
-                console.error(`   手動で作成する場合: ${fallbackURL}`);
+                solutions.push(`手動で作成: ${fallbackURL}`);
             }
+            showFriendlyError("PR の作成に失敗しました", "GitHub CLI で PR を作成できませんでした", solutions, [
+                "エラーを確認・修正後に ai-git pr を再実行",
+                "ai-git push でブランチをプッシュ（未プッシュの場合）",
+            ]);
         }
         else {
-            console.error("❌ Failed to create PR.");
+            const solutions = [
+                "Check if branch is pushed: git log origin/$(git branch --show-current)",
+                "Verify GitHub connection",
+                "Check auth status: gh auth status",
+                "Check if PR with same name already exists on GitHub",
+            ];
             if (fallbackURL) {
-                console.error(`   Create manually: ${fallbackURL}`);
+                solutions.push(`Create manually: ${fallbackURL}`);
             }
+            showFriendlyError("Failed to create PR", "Could not create pull request via GitHub CLI", solutions, [
+                "Fix the error and run ai-git pr again",
+                "Use ai-git push to push branch (if not pushed)",
+            ]);
         }
         process.exit(1);
     }
 }
+/**
+ * pr サブコマンドのメイン処理
+ * 1. GitHub CLI の確認と認証
+ * 2. ベースブランチの検出
+ * 3. ブランチを自動プッシュ（未プッシュの場合）
+ * 4. AI で PR の説明文を生成
+ * 5. ユーザーに確認後、GitHub CLI で PR を作成
+ */
 async function mainPR() {
     checkGHCLI();
     checkGHAuth();
@@ -979,10 +1223,24 @@ async function mainPR() {
     }).trim();
     if (currentBranch === baseBranch) {
         if (language === "ja") {
-            console.error(`❌ ベースブランチ (${baseBranch}) からPRを作成できません。`);
+            showFriendlyError(`ベースブランチ (${baseBranch}) から PR を作成できません`, "PR は異なるブランチから作成する必要があります", [
+                "新しいブランチを作成してください",
+                "または、既存のブランチに切り替えてください: git checkout <ブランチ名>",
+            ], [
+                "ai-git checkout で新しいブランチを作成",
+                "ブランチ作成後に変更をコミット: ai-git commit",
+                "その後 PR を作成: ai-git pr",
+            ]);
         }
         else {
-            console.error(`❌ Cannot create PR from base branch (${baseBranch}).`);
+            showFriendlyError(`Cannot create PR from base branch (${baseBranch})`, "PRs must be created from a different branch", [
+                "Create a new branch",
+                "Or switch to an existing branch: git checkout <branch-name>",
+            ], [
+                "Use ai-git checkout to create a new branch",
+                "Commit changes after creating branch: ai-git commit",
+                "Then create PR: ai-git pr",
+            ]);
         }
         process.exit(1);
     }
@@ -1007,7 +1265,28 @@ async function mainPR() {
             console.log(`📤 ブランチを push 中... (origin ${currentBranch})`);
             const pushResult = (0, child_process_1.spawnSync)("git", ["push"], { stdio: "inherit" });
             if (pushResult.status !== 0) {
-                console.error("❌ ブランチの push に失敗しました。");
+                if (language === "ja") {
+                    showFriendlyError("ブランチの push に失敗しました (PR作成前)", "PR を作成する前にブランチをリモートにプッシュできませんでした", [
+                        "リモートリポジトリの設定を確認: git remote -v",
+                        "プッシュ権限を確認してください",
+                        "リモートブランチとの競合確認: git pull --rebase",
+                        "ネットワーク接続を確認してください",
+                    ], [
+                        "競合解決後に ai-git pr を再実行",
+                        "手動でプッシュ: git push",
+                    ]);
+                }
+                else {
+                    showFriendlyError("Failed to push branch (before PR creation)", "Could not push branch to remote before creating PR", [
+                        "Check remote repository: git remote -v",
+                        "Verify push permissions",
+                        "Check for conflicts: git pull --rebase",
+                        "Verify network connection",
+                    ], [
+                        "Run ai-git pr again after fixing",
+                        "Push manually: git push",
+                    ]);
+                }
                 process.exit(1);
             }
         }
@@ -1018,10 +1297,26 @@ async function mainPR() {
         const pushResult = (0, child_process_1.spawnSync)("git", ["push", "-u", "origin", currentBranch], { stdio: "inherit" });
         if (pushResult.status !== 0) {
             if (language === "ja") {
-                console.error("❌ ブランチの push に失敗しました。");
+                showFriendlyError("新しいブランチの push に失敗しました (PR作成前)", "PR を作成する前に新しいブランチをリモートに作成できませんでした", [
+                    "リモートリポジトリの URL を確認: git remote -v",
+                    "リモートリポジトリへのプッシュ権限を確認",
+                    "SSH キーまたは認証情報が正しく設定されているか確認",
+                    "ネットワーク接続を確認してください",
+                ], [
+                    "認証・権限を確認後に ai-git pr を再実行",
+                    "手動でプッシュ: git push -u origin " + currentBranch,
+                ]);
             }
             else {
-                console.error("❌ Failed to push branch.");
+                showFriendlyError("Failed to push new branch (before PR creation)", "Could not create new branch on remote before creating PR", [
+                    "Check remote repository URL: git remote -v",
+                    "Verify push permissions to remote",
+                    "Check SSH keys or credentials are set up correctly",
+                    "Verify network connection",
+                ], [
+                    "Run ai-git pr again after fixing auth/permissions",
+                    "Push manually: git push -u origin " + currentBranch,
+                ]);
             }
             process.exit(1);
         }
