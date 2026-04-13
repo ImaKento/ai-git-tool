@@ -37,11 +37,11 @@ git add .
 2. コミットメッセージを生成
 
 ```bash
-# 通常（1行の Conventional Commits）
+# 通常（タイトル + 箇条書き本文）
 ai-commit
 
-# 詳細（タイトル + 箇条書き本文）
-ai-commit --detailed
+# 短文（1行の Conventional Commits）
+ai-commit --short
 ```
 
 3. 確認プロンプトで選択

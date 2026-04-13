@@ -1,0 +1,30 @@
+{
+  "name": "ai-commit",
+  "version": "1.0.0",
+  "description": "AI-powered git commit message generator using Gemini API",
+  "main": "dist/index.js",
+  "bin": {
+    "ai-commit": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["git", "commit", "ai", "gemini", "cli"],
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
