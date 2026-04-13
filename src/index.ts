@@ -10,30 +10,16 @@ type Language = "ja" | "en";
 
 // ── フラグ解析 ──────────────────────────────────────────
 const args = process.argv.slice(2);
-const short = args.includes("--short");
-const showHelp = args.includes("--help") || args.includes("-h");
-const langArg = getOptionValue(args, "--lang");
+
+// サブコマンドの抽出
+const subcommand = args[0];
+const subcommandArgs = args.slice(1);
+
+const showHelp =
+  args.includes("--help") || args.includes("-h") || subcommand === "help";
 const setLangArg = getOptionValue(args, "--set-lang");
 
-const CONFIG_DIR = path.join(os.homedir(), ".ai-commit");
-const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
-
-if (showHelp) {
-  console.log(`
-Usage: ai-commit [options]
-
-Options:
-  --short           Generate a short one-line commit message
-  --lang <ja|en>    Set language for this run
-  --set-lang <ja|en> Persist default language
-  --help, -h        Show this help message
-
-Environment:
-  GEMINI_API_KEY   Your Google Gemini API key (required)
-`);
-  process.exit(0);
-}
-
+// --set-lang は特別扱い（サブコマンド不要）
 if (setLangArg) {
   const nextLang = parseLanguage(setLangArg);
   if (!nextLang) {
@@ -43,6 +29,63 @@ if (setLangArg) {
   saveConfig({ language: nextLang });
   console.log(`✅ デフォルト言語を '${nextLang}' に保存しました。`);
   process.exit(0);
+}
+
+// サブコマンド固有のフラグ
+const short = subcommandArgs.includes("--short");
+const langArg = getOptionValue(subcommandArgs, "--lang");
+
+const CONFIG_DIR = path.join(os.homedir(), ".ai-commit");
+const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+
+if (showHelp) {
+  console.log(`
+Usage: ai-git <command> [options]
+
+Commands:
+  commit            Generate commit message from staged changes
+  pr                Generate PR description and create pull request
+
+Commit Options:
+  --short           Generate a short one-line commit message
+  --lang <ja|en>    Set language for this run
+
+PR Options:
+  --lang <ja|en>    Set language for this run
+
+Global Options:
+  --set-lang <ja|en> Persist default language
+  --help, -h        Show this help message
+
+Environment:
+  GEMINI_API_KEY   Your Google Gemini API key (required)
+
+Examples:
+  ai-git commit
+  ai-git commit --short --lang en
+  ai-git pr
+  ai-git pr --lang en
+  ai-git --set-lang ja
+`);
+  process.exit(0);
+}
+
+// サブコマンドの検証
+if (!subcommand || (subcommand !== "commit" && subcommand !== "pr")) {
+  console.error("Error: Please specify a command: 'commit' or 'pr'");
+  console.error("Run 'ai-git --help' for usage information");
+  process.exit(1);
+}
+
+// commit サブコマンド固有のバリデーション
+if (subcommand === "commit" && short && subcommandArgs.length > 2) {
+  // 追加のバリデーションが必要な場合
+}
+
+// pr サブコマンドでは --short は使えない
+if (subcommand === "pr" && short) {
+  console.error("Error: --short cannot be used with 'pr' command");
+  process.exit(1);
 }
 
 const language = resolveLanguage(langArg);
@@ -208,6 +251,11 @@ function doCommit(message: string): void {
 
 // ── メイン ───────────────────────────────────────────────
 async function main() {
+  if (subcommand === "pr") {
+    return mainPR();
+  }
+
+  // subcommand === "commit"
   const diff = getStagedDiff();
 
   if (!diff.trim()) {
@@ -347,4 +395,275 @@ function handleGeminiError(error: unknown): void {
 
   console.error("❌ Gemini API 呼び出しに失敗しました。");
   console.error(`   詳細: ${message}`);
+}
+
+// ── PR生成用の関数群 ─────────────────────────────────────
+
+function checkGHCLI(): void {
+  try {
+    execSync("gh --version", { encoding: "utf-8", stdio: "pipe" });
+  } catch {
+    if (language === "ja") {
+      console.error("❌ GitHub CLI (gh) がインストールされていません。");
+      console.error("   インストール: https://cli.github.com/");
+    } else {
+      console.error("❌ GitHub CLI (gh) is not installed.");
+      console.error("   Install from: https://cli.github.com/");
+    }
+    process.exit(1);
+  }
+}
+
+function detectBaseBranch(): string {
+  // Try 1: Get default branch from remote
+  try {
+    const result = execSync("git symbolic-ref refs/remotes/origin/HEAD", {
+      encoding: "utf-8",
+      stdio: "pipe",
+    }).trim();
+    // Parse "refs/remotes/origin/main" -> "main"
+    return result.replace("refs/remotes/origin/", "");
+  } catch {
+    // Fallback: Try common branch names
+  }
+
+  // Try 2: Check for common base branches
+  for (const branch of ["main", "master", "develop"]) {
+    try {
+      execSync(`git rev-parse --verify ${branch}`, { stdio: "pipe" });
+      return branch;
+    } catch {
+      continue;
+    }
+  }
+
+  // Error: No base branch found
+  if (language === "ja") {
+    console.error("❌ ベースブランチを検出できませんでした。");
+    console.error("   main, master, develop のいずれも存在しません。");
+  } else {
+    console.error("❌ Could not detect base branch.");
+    console.error("   None of main, master, develop exist.");
+  }
+  process.exit(1);
+}
+
+function getBranchDiff(baseBranch: string): { commits: string; diff: string } {
+  try {
+    const commits = execSync(
+      `git log ${baseBranch}..HEAD --format="%h %s%n%b%n---"`,
+      { encoding: "utf-8" },
+    );
+
+    const diff = execSync(`git diff ${baseBranch}...HEAD`, {
+      encoding: "utf-8",
+    });
+
+    return { commits, diff };
+  } catch (error) {
+    if (language === "ja") {
+      console.error("❌ ブランチの差分取得に失敗しました。");
+    } else {
+      console.error("❌ Failed to get branch diff.");
+    }
+    process.exit(1);
+  }
+}
+
+function buildPRPrompt(commits: string, diff: string, lang: Language): string {
+  if (lang === "ja") {
+    return `あなたは GitHub の Pull Request 作成の専門家です。
+次のコミット履歴と差分から、PR の説明文を生成してください。
+
+ルール:
+- GitHub の標準フォーマットを使用する
+- ## Summary: 2-3文で変更の概要を説明
+- ## Changes: "- " で始まる箇条書き（3-7個）で具体的な変更内容
+- ## Test plan: テスト方法の箇条書き（2-4個）
+- 命令形を使う
+- WHATとWHYを重視し、HOWは最小限に
+- 出力はPR説明文のみ（余計な説明は不要）
+
+コミット履歴:
+${commits}
+
+変更差分:
+${diff}`;
+  }
+
+  return `You are an expert at writing GitHub Pull Request descriptions.
+Generate a PR description from the following commit history and diff.
+
+Rules:
+- Use standard GitHub format
+- ## Summary: 2-3 sentences explaining the overall change
+- ## Changes: bullet points (3-7 items) with "- " prefix detailing specific changes
+- ## Test plan: bullet points (2-4 items) describing how to test
+- Use imperative mood
+- Focus on WHAT and WHY, minimize HOW
+- Output ONLY the PR description, no extra explanation
+
+Commit history:
+${commits}
+
+Diff:
+${diff}`;
+}
+
+async function generatePRDescription(baseBranch: string): Promise<string> {
+  const { commits, diff } = getBranchDiff(baseBranch);
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error("❌ GEMINI_API_KEY が未設定です。");
+    console.error(
+      '   取得先: https://aistudio.google.com/apikey\n   例: export GEMINI_API_KEY="your_api_key"',
+    );
+    process.exit(1);
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+  const prompt = buildPRPrompt(commits, diff, language);
+
+  try {
+    const result = await model.generateContent(prompt);
+    return result.response.text().trim();
+  } catch (error) {
+    handleGeminiError(error);
+    process.exit(1);
+  }
+}
+
+function createPR(description: string, baseBranch: string): void {
+  // Extract title from first non-header line
+  const lines = description.split("\n");
+  const titleLine =
+    lines.find((l) => l.trim() && !l.startsWith("#")) || "Pull Request";
+
+  const result = spawnSync(
+    "gh",
+    [
+      "pr",
+      "create",
+      "--base",
+      baseBranch,
+      "--title",
+      titleLine.trim(),
+      "--body",
+      description,
+    ],
+    { stdio: "inherit" },
+  );
+
+  if (result.status !== 0) {
+    if (language === "ja") {
+      console.error("❌ PR の作成に失敗しました。");
+    } else {
+      console.error("❌ Failed to create PR.");
+    }
+    process.exit(1);
+  }
+}
+
+async function mainPR() {
+  checkGHCLI();
+
+  const baseBranch = detectBaseBranch();
+  const currentBranch = execSync("git branch --show-current", {
+    encoding: "utf-8",
+  }).trim();
+
+  if (currentBranch === baseBranch) {
+    if (language === "ja") {
+      console.error(
+        `❌ ベースブランチ (${baseBranch}) からPRを作成できません。`,
+      );
+    } else {
+      console.error(`❌ Cannot create PR from base branch (${baseBranch}).`);
+    }
+    process.exit(1);
+  }
+
+  // ブランチが push されているかチェック、されていなければ自動 push
+  try {
+    // upstream が設定されているかチェック
+    execSync(`git rev-parse --abbrev-ref ${currentBranch}@{upstream}`, {
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+    // upstream が存在する場合、リモートと同期しているかチェック
+    const localCommit = execSync(`git rev-parse ${currentBranch}`, {
+      encoding: "utf-8",
+      stdio: "pipe",
+    }).trim();
+    const remoteCommit = execSync(
+      `git rev-parse ${currentBranch}@{upstream}`,
+      { encoding: "utf-8", stdio: "pipe" },
+    ).trim();
+
+    if (localCommit !== remoteCommit) {
+      // ローカルに新しいコミットがある場合は push
+      console.log(`📤 ブランチを push 中... (origin ${currentBranch})`);
+      const pushResult = spawnSync("git", ["push"], { stdio: "inherit" });
+      if (pushResult.status !== 0) {
+        console.error("❌ ブランチの push に失敗しました。");
+        process.exit(1);
+      }
+    }
+  } catch {
+    // upstream が存在しない場合、新規 push
+    console.log(
+      `📤 ブランチを push 中... (origin ${currentBranch} を新規作成)`,
+    );
+    const pushResult = spawnSync(
+      "git",
+      ["push", "-u", "origin", currentBranch],
+      { stdio: "inherit" },
+    );
+    if (pushResult.status !== 0) {
+      if (language === "ja") {
+        console.error("❌ ブランチの push に失敗しました。");
+      } else {
+        console.error("❌ Failed to push branch.");
+      }
+      process.exit(1);
+    }
+  }
+
+  console.log(`🤖 PR説明文を生成中... (${baseBranch}...${currentBranch})`);
+
+  const description = await generatePRDescription(baseBranch);
+
+  console.log(`\n📝 Generated PR description:\n`);
+  description.split("\n").forEach((line) => {
+    console.log(`  ${line}`);
+  });
+  console.log();
+
+  const answer = await askUser(
+    "Create PR with this description? [y/n/e(edit)]: ",
+  );
+
+  let finalDescription = description;
+
+  if (answer === "e" || answer === "edit") {
+    finalDescription = editInEditor(description);
+    if (!finalDescription) {
+      console.log("Aborted: empty description.");
+      process.exit(0);
+    }
+    console.log(`\n✏️  Edited description:\n`);
+    finalDescription.split("\n").forEach((line) => {
+      console.log(`  ${line}`);
+    });
+    console.log();
+  } else if (answer !== "y" && answer !== "yes") {
+    console.log("Aborted.");
+    process.exit(0);
+  }
+
+  createPR(finalDescription, baseBranch);
+  console.log(`\n✅ PR created successfully!`);
 }

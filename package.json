@@ -1,17 +1,25 @@
 {
-  "name": "ai-commit",
+  "name": "ai-git",
   "version": "1.0.0",
-  "description": "AI-powered git commit message generator using Gemini API",
+  "description": "AI-powered git commit and PR description generator using Gemini API",
   "main": "dist/index.js",
   "bin": {
-    "ai-commit": "dist/index.js"
+    "ai-git": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["git", "commit", "ai", "gemini", "cli"],
+  "keywords": [
+    "git",
+    "commit",
+    "pr",
+    "pull-request",
+    "ai",
+    "gemini",
+    "cli"
+  ],
   "license": "MIT",
   "files": [
     "dist"
