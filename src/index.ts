@@ -45,6 +45,7 @@ Usage: ai-git <command> [options]
 Commands:
   commit            Generate commit message from staged changes
   pr                Generate PR description and create pull request
+  checkout          Create branch from current changes
 
 Commit Options:
   --lang <ja|en>    Set language for this run
@@ -63,8 +64,11 @@ Environment:
   process.exit(0);
 }
 
-if (!subcommand || (subcommand !== "commit" && subcommand !== "pr")) {
-  console.error("Error: Please specify a command: 'commit' or 'pr'");
+if (
+  !subcommand ||
+  (subcommand !== "commit" && subcommand !== "pr" && subcommand !== "checkout")
+) {
+  console.error("Error: Please specify a command: 'commit', 'pr' or 'checkout'");
   console.error("Run 'ai-git --help' for usage information");
   process.exit(1);
 }
@@ -188,8 +192,264 @@ function doCommit(message: string): void {
   }
 }
 
+async function mainCheckout(): Promise<void> {
+  const suggested = await suggestBranchName();
+  const branchName = ensureAvailableBranchName(suggested);
+  const result = spawnSync("git", ["checkout", "-b", branchName], {
+    stdio: "inherit",
+  });
+  if (result.status !== 0) {
+    console.error("❌ ブランチ作成に失敗しました。");
+    process.exit(1);
+  }
+  console.log(`✅ ブランチを作成しました: ${branchName}`);
+}
+
+async function suggestBranchName(): Promise<string> {
+  const files = getChangedFiles();
+  const diff = getCombinedDiff();
+  const fromAI = await suggestBranchNameWithAI(files, diff);
+  if (fromAI) {
+    return fromAI;
+  }
+  const type = inferBranchType(files, diff);
+  const topic = inferTopic(files, diff);
+
+  if (!topic) {
+    return `${type}/update-${randomSuffix()}`;
+  }
+  return `${type}/${topic}`;
+}
+
+async function suggestBranchNameWithAI(
+  files: string[],
+  diff: string,
+): Promise<string | null> {
+  if (!process.env.GROQ_API_KEY) {
+    return null;
+  }
+
+  const compactFiles = files.slice(0, 30).join("\n");
+  const compactDiff = truncateByChars(diff, 2800);
+  const prompt = `You are an expert at naming git branches.
+Generate exactly one branch name from the following changes.
+
+Rules:
+- Output only branch name, nothing else
+- Format: <type>/<slug>
+- type must be one of: feat, fix, docs, chore, refactor, test, style
+- slug must use kebab-case
+- Prefer meaningful feature intent over noisy token names
+- If changes look like new feature or command addition, prefer feat
+
+Changed files:
+${compactFiles}
+
+Diff:
+${compactDiff}`;
+
+  try {
+    const raw = await generateText(prompt);
+    return normalizeBranchCandidate(raw);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeBranchCandidate(raw: string): string | null {
+  const firstLine = raw.split("\n")[0]?.trim().toLowerCase() || "";
+  const cleaned = firstLine.replace(/[`"' ]/g, "");
+  const normalized = cleaned.replace(/^feature\//, "feat/");
+  const [head, ...tail] = normalized.split("/");
+  if (!head || tail.length === 0) {
+    return null;
+  }
+  const validTypes = new Set([
+    "feat",
+    "fix",
+    "docs",
+    "chore",
+    "refactor",
+    "test",
+    "style",
+  ]);
+  if (!validTypes.has(head)) {
+    return null;
+  }
+  const slug = sanitizeBranchPart(tail.join("-"));
+  if (!slug || slug.length < 3) {
+    return null;
+  }
+  return `${head}/${slug}`;
+}
+
+function getChangedFiles(): string[] {
+  const staged = getCommandOutput("git diff --cached --name-only");
+  const unstaged = getCommandOutput("git diff --name-only");
+  const merged = `${staged}\n${unstaged}`
+    .split("\n")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  return Array.from(new Set(merged));
+}
+
+function getCombinedDiff(): string {
+  const staged = getCommandOutput("git diff --cached");
+  const unstaged = getCommandOutput("git diff");
+  return `${staged}\n${unstaged}`;
+}
+
+function getCommandOutput(command: string): string {
+  try {
+    return execSync(command, { encoding: "utf-8", stdio: "pipe" });
+  } catch {
+    return "";
+  }
+}
+
+function inferBranchType(files: string[], diff: string): string {
+  const lowerFiles = files.map((f) => f.toLowerCase());
+  const lowerDiff = diff.toLowerCase();
+
+  if (lowerFiles.length > 0 && lowerFiles.every((f) => f.endsWith(".md"))) {
+    return "docs";
+  }
+  if (
+    lowerFiles.some((f) => f.includes("readme") || f.endsWith(".md")) &&
+    lowerFiles.length <= 2
+  ) {
+    return "docs";
+  }
+  if (
+    lowerFiles.some((f) => f.includes("package.json") || f.includes("lock")) &&
+    lowerFiles.length <= 2
+  ) {
+    return "chore";
+  }
+  if (
+    lowerDiff.includes("fix") ||
+    lowerDiff.includes("bug") ||
+    lowerDiff.includes("error")
+  ) {
+    return "fix";
+  }
+  return "feat";
+}
+
+function inferTopic(files: string[], diff: string): string {
+  const stopWords = new Set([
+    "src",
+    "dist",
+    "index",
+    "readme",
+    "package",
+    "lock",
+    "json",
+    "ts",
+    "js",
+    "md",
+    "diff",
+    "added",
+    "removed",
+    "file",
+    "files",
+    "change",
+    "changes",
+    "update",
+    "updated",
+    "line",
+    "lines",
+  ]);
+
+  // ファイル名ベースを優先し、diff本文は補助的に使う
+  const fileTokens = files
+    .flatMap((f) => f.split(/[\/._-]+/))
+    .map((v) => v.toLowerCase())
+    .filter((v) => isGoodTopicToken(v, stopWords));
+
+  const diffTokens = diff
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((v) => isGoodTopicToken(v, stopWords))
+    .slice(0, 20);
+
+  const tokens = [...fileTokens, ...diffTokens]
+    .map((v) => sanitizeBranchPart(v))
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return "";
+  }
+
+  const unique = Array.from(new Set(tokens));
+  return unique.slice(0, 3).join("-");
+}
+
+function isGoodTopicToken(token: string, stopWords: Set<string>): boolean {
+  if (token.length < 3) {
+    return false;
+  }
+  if (stopWords.has(token)) {
+    return false;
+  }
+  // 16進ハッシュ断片（例: 22e133f, cd9353f）を除外
+  if (/^[a-f0-9]{6,}$/.test(token)) {
+    return false;
+  }
+  // 数字主体トークンを除外
+  if (/^\d+$/.test(token)) {
+    return false;
+  }
+  return true;
+}
+
+function sanitizeBranchPart(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function randomSuffix(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
+
+function ensureAvailableBranchName(baseName: string): string {
+  const [headRaw, ...tailRaw] = baseName.split("/");
+  const head = sanitizeBranchPart(headRaw || "feat");
+  const tail = sanitizeBranchPart(tailRaw.join("-") || `update-${randomSuffix()}`);
+  const normalized = `${head || "feat"}/${tail}`;
+
+  if (!branchExists(normalized)) {
+    return normalized;
+  }
+
+  let i = 2;
+  while (branchExists(`${normalized}-${i}`)) {
+    i += 1;
+  }
+  return `${normalized}-${i}`;
+}
+
+function branchExists(name: string): boolean {
+  try {
+    execSync(`git show-ref --verify --quiet refs/heads/${name}`, {
+      stdio: "pipe",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── メイン ───────────────────────────────────────────────
 async function main() {
+  if (subcommand === "checkout") {
+    await mainCheckout();
+    return;
+  }
+
   if (subcommand === "pr") {
     await mainPR();
     return;

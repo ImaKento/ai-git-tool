@@ -108,6 +108,22 @@ ai-git pr --lang en
 - ## Changes: 具体的な変更内容（箇条書き）
 - ## Test plan: テスト方法（箇条書き）
 
+### ブランチ作成（自動命名）
+
+変更差分（ステージ済み + 未ステージ）からブランチ名を推定して作成します。
+
+```bash
+ai-git checkout
+```
+
+命名例:
+
+- `feat/auth-login-flow`
+- `fix/api-error-handling`
+- `docs/readme-update`
+
+推定できない場合は `feat/update-xxxxxx` のような名前を自動で使います。
+
 ## 開発
 
 ```bash
