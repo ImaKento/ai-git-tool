@@ -38,7 +38,7 @@ Commands:
   commit            Generate commit message from staged changes
   push              Commit with AI message and push to remote (git add . + commit + push)
   pr                Generate PR description and create pull request
-  checkout          Create branch from current changes
+  checkout [branch] Create branch from changes, or switch+pull existing branch
 
 Commit Options:
   --lang <ja|en>    Set language for this run
@@ -73,7 +73,9 @@ if (
   );
   console.error("   ai-git push     - コミット後、リモートにプッシュ");
   console.error("   ai-git pr       - PR の説明を生成して Pull Request を作成");
-  console.error("   ai-git checkout - 変更内容から新しいブランチを作成");
+  console.error(
+    "   ai-git checkout - 引数なし: 新規ブランチ作成 / 引数あり: ブランチ移動して pull",
+  );
   console.error("");
   console.error("💡 詳しい使い方:");
   console.error("   ai-git --help");
@@ -89,7 +91,7 @@ const language = resolveLanguage(langArg);
 // ── メイン ───────────────────────────────────────────────
 async function main() {
   if (subcommand === "checkout") {
-    await runCheckoutCommand();
+    await runCheckoutCommand(subcommandArgs[0]);
     return;
   }
 
