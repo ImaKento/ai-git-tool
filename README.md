@@ -167,6 +167,19 @@ fix/api-error-handling
 docs/readme-update
 ```
 
+### ブランチ切り替え + 最新化
+
+既存ブランチ名を引数に渡すと、ブランチへ移動してから `git pull` で最新化します。
+
+```bash
+ai-git checkout main
+```
+
+実行内容:
+
+- `git checkout <branch>`
+- `git pull`
+
 ### 言語設定
 
 デフォルト言語は日本語です。
