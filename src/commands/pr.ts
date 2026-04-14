@@ -10,6 +10,7 @@ import {
   getPullRequestURL,
   createPR,
   pushBranchForPR,
+  syncWithBaseBranch,
 } from "../services/github.js";
 import {
   generatePRDescription,
@@ -59,6 +60,9 @@ export async function runPRCommand(language: Language): Promise<void> {
     }
     process.exit(1);
   }
+
+  // ベースブランチとの同期（コンフリクトチェック・マージ）
+  await syncWithBaseBranch(baseBranch, currentBranch, language);
 
   // ブランチをプッシュ
   pushBranchForPR(currentBranch, language);
