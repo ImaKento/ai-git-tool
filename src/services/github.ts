@@ -1,6 +1,7 @@
 import { execSync, spawnSync } from "child_process";
 import type { Language } from "../types.js";
 import { showFriendlyError } from "../utils/errors.js";
+import { askUser } from "../utils/ui.js";
 
 /**
  * GitHub CLI がインストールされているかチェック
@@ -416,4 +417,200 @@ export function pushBranchForPR(currentBranch: string, language: Language): void
       process.exit(1);
     }
   }
+}
+
+/**
+ * コンフリクトがあるかを非破壊的に検知
+ */
+export function checkConflicts(baseBranch: string): boolean {
+  try {
+    const mergeBase = execSync(`git merge-base HEAD origin/${baseBranch}`, {
+      encoding: "utf-8",
+      stdio: "pipe",
+    }).trim();
+
+    const mergeTreeOutput = execSync(
+      `git merge-tree ${mergeBase} origin/${baseBranch} HEAD`,
+      {
+        encoding: "utf-8",
+        stdio: "pipe",
+      },
+    );
+
+    return mergeTreeOutput.includes("<<<<<<<");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ベースブランチとの同期処理（PR作成前）
+ */
+export async function syncWithBaseBranch(
+  baseBranch: string,
+  currentBranch: string,
+  language: Language,
+): Promise<void> {
+  console.log(
+    language === "ja"
+      ? `🔄 ${baseBranch} との同期を確認中...`
+      : `🔄 Checking sync with ${baseBranch}...`,
+  );
+
+  // 最新を取得
+  try {
+    execSync(`git fetch origin ${baseBranch}`, { stdio: "pipe" });
+  } catch {
+    if (language === "ja") {
+      showFriendlyError(
+        "リモートブランチの取得に失敗しました",
+        `origin/${baseBranch} を取得できませんでした`,
+        [
+          "ネットワーク接続を確認してください",
+          "リモートリポジトリの設定を確認: git remote -v",
+          `リモートに ${baseBranch} ブランチが存在するか確認`,
+        ],
+        ["接続を確認後に ai-git pr を再実行"],
+      );
+    } else {
+      showFriendlyError(
+        "Failed to fetch remote branch",
+        `Could not fetch origin/${baseBranch}`,
+        [
+          "Check network connection",
+          "Check remote repository: git remote -v",
+          `Check if ${baseBranch} branch exists on remote`,
+        ],
+        ["Run ai-git pr again after fixing connection"],
+      );
+    }
+    process.exit(1);
+  }
+
+  // コンフリクトチェック
+  const hasConflicts = checkConflicts(baseBranch);
+
+  if (!hasConflicts) {
+    // コンフリクトなし → 自動的にマージ
+    console.log(
+      language === "ja"
+        ? `✅ コンフリクトなし - origin/${baseBranch} をマージ中...`
+        : `✅ No conflicts - merging origin/${baseBranch}...`,
+    );
+
+    const mergeResult = spawnSync("git", ["merge", `origin/${baseBranch}`], {
+      stdio: "inherit",
+    });
+
+    if (mergeResult.status !== 0) {
+      if (language === "ja") {
+        showFriendlyError(
+          "マージに失敗しました",
+          `origin/${baseBranch} のマージ中にエラーが発生しました`,
+          [
+            "Git の状態を確認: git status",
+            "マージを中止する場合: git merge --abort",
+          ],
+          ["問題を解決後に ai-git pr を再実行"],
+        );
+      } else {
+        showFriendlyError(
+          "Merge failed",
+          `Error occurred while merging origin/${baseBranch}`,
+          ["Check git status: git status", "Abort merge: git merge --abort"],
+          ["Run ai-git pr again after fixing"],
+        );
+      }
+      process.exit(1);
+    }
+
+    console.log(
+      language === "ja"
+        ? `✅ origin/${baseBranch} をマージしました`
+        : `✅ Merged origin/${baseBranch}`,
+    );
+    return;
+  }
+
+  // コンフリクトあり → 選択肢を提示
+  console.log(
+    language === "ja"
+      ? `⚠️  origin/${baseBranch} とのコンフリクトを検知しました`
+      : `⚠️  Conflicts detected with origin/${baseBranch}`,
+  );
+
+  const choices =
+    language === "ja"
+      ? `次の操作を選択してください:
+  [m] merge origin/${baseBranch} してコンフリクトを解消してからPR作成
+  [r] rebase onto origin/${baseBranch} してコンフリクトを解消してからPR作成
+  [s] スキップ（そのままPR作成）
+  [a] 中止
+選択 [m/r/s/a]: `
+      : `Choose an action:
+  [m] merge origin/${baseBranch} and resolve conflicts before creating PR
+  [r] rebase onto origin/${baseBranch} and resolve conflicts before creating PR
+  [s] skip (create PR anyway)
+  [a] abort
+Choice [m/r/s/a]: `;
+
+  const choice = await askUser(choices);
+
+  if (choice === "m" || choice === "merge") {
+    console.log(
+      language === "ja"
+        ? `🔀 origin/${baseBranch} をマージ中...`
+        : `🔀 Merging origin/${baseBranch}...`,
+    );
+    const result = spawnSync("git", ["merge", `origin/${baseBranch}`], {
+      stdio: "inherit",
+    });
+
+    if (result.status !== 0) {
+      if (language === "ja") {
+        console.log(
+          `\n⚠️  コンフリクトを解消してください。解消後、以下を実行:`,
+        );
+        console.log(`   git add .`);
+        console.log(`   git commit`);
+        console.log(`   ai-git pr\n`);
+      } else {
+        console.log(`\n⚠️  Please resolve conflicts. After resolving, run:`);
+        console.log(`   git add .`);
+        console.log(`   git commit`);
+        console.log(`   ai-git pr\n`);
+      }
+      process.exit(1);
+    }
+  } else if (choice === "r" || choice === "rebase") {
+    console.log(
+      language === "ja"
+        ? `🔀 origin/${baseBranch} へ rebase 中...`
+        : `🔀 Rebasing onto origin/${baseBranch}...`,
+    );
+    const result = spawnSync("git", ["rebase", `origin/${baseBranch}`], {
+      stdio: "inherit",
+    });
+
+    if (result.status !== 0) {
+      if (language === "ja") {
+        console.log(
+          `\n⚠️  コンフリクトを解消してください。解消後、以下を実行:`,
+        );
+        console.log(`   git add .`);
+        console.log(`   git rebase --continue`);
+        console.log(`   ai-git pr\n`);
+      } else {
+        console.log(`\n⚠️  Please resolve conflicts. After resolving, run:`);
+        console.log(`   git add .`);
+        console.log(`   git rebase --continue`);
+        console.log(`   ai-git pr\n`);
+      }
+      process.exit(1);
+    }
+  } else if (choice === "a" || choice === "abort") {
+    console.log(language === "ja" ? "中止しました。" : "Aborted.");
+    process.exit(0);
+  }
+  // 's' または 'skip' の場合はそのまま続行
 }
