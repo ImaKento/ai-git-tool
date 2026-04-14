@@ -4,24 +4,48 @@
 
 ## 🚀 クイックスタート（推奨）
 
-GitHub Actions により npm publish が自動化されています。リリースは以下のコマンド一発で完了します。
+GitHub Actions により npm publish が自動化されています。リリースは以下の2ステップで完了します。
+
+### ステップ1: リリースコマンド実行（npm publish まで自動）
 
 ```bash
-# パッチバージョンアップ（1.3.0 → 1.3.1）
+# パッチバージョンアップ（1.3.0 → 1.3.1）- バグ修正
 npm run release:patch
 
-# マイナーバージョンアップ（1.3.0 → 1.4.0）
+# マイナーバージョンアップ（1.3.0 → 1.4.0）- 新機能追加
 npm run release:minor
 
-# メジャーバージョンアップ（1.3.0 → 2.0.0）
+# メジャーバージョンアップ（1.3.0 → 2.0.0）- 破壊的変更
 npm run release:major
 ```
 
-このコマンドは：
-1. `package.json` のバージョンを自動更新
-2. Git コミット & タグを自動作成
-3. タグを GitHub に push
-4. **GitHub Actions が自動的に npm publish を実行** ✨
+このコマンドが自動的に：
+1. ✅ `package.json` のバージョンを更新
+2. ✅ Git コミット & タグを作成
+3. ✅ GitHub に push
+4. ✅ **GitHub Actions が npm publish を実行**
+
+### ステップ2: リリースノート作成
+
+```bash
+# GitHub CLI でリリースノート作成
+gh release create v1.3.1 --title "v1.3.1" --notes "
+## ✨ What's New
+
+### 新機能
+- PR作成時にコンフリクトを自動検知
+
+### バグ修正
+- ブランチ名の不具合を修正
+
+## 📦 Installation
+\`\`\`bash
+npm install -g ai-git-tool@1.3.1
+\`\`\`
+"
+```
+
+これだけです！
 
 ## 前提条件
 
@@ -87,6 +111,24 @@ GitHub Actions で自動 publish するには、npm トークンを GitHub Secre
 4. 「Add secret」をクリック
 
 これで設定完了です。以降、タグを push すると自動的に npm publish が実行されます。
+
+### 3. タグ保護の設定（推奨）
+
+勝手にタグが作られるのを防ぐため、Rulesets でタグを保護します。
+
+1. https://github.com/ImaKento/ai-git-tool/settings/rules にアクセス
+2. 「New ruleset」→「New tag ruleset」をクリック
+3. 設定：
+   - **Ruleset Name**: `Protect version tags`
+   - **Enforcement status**: Active を選択
+   - **Target tags**: 「Add target」→「Include by pattern」→ `v*` と入力
+   - **Rules**:
+     - ✅ Restrict creations（タグ作成を制限）
+     - ✅ Restrict deletions（タグ削除を制限）
+   - **Bypass list**: 「Add bypass」→「Repository roles」→「Repository admin」を選択
+4. 「Create」をクリック
+
+これで、`v*` パターンのタグは管理者（あなた）だけが作成・削除できるようになります。
 
 ## セマンティックバージョニング（SemVer）
 
@@ -473,6 +515,45 @@ npm unpublish ai-git-tool@1.2.0
 
 ただし、**本番環境では非推奨**です。代わりに新しいバージョンをリリースして修正してください。
 
+## 🔒 セキュリティ
+
+### 勝手に publish されることはない？
+
+適切に設定すれば、以下の理由で安全です：
+
+1. **main ブランチ保護**
+   - 直接 push できない設定になっている
+   - PR からしかマージできない
+
+2. **Rulesets でタグ保護**
+   - `v*` タグは管理者（あなた）だけが作成可能
+   - フォークしても勝手にタグを作れない
+   - PR からタグは push されない
+
+3. **npm トークンは GitHub Secrets に保存**
+   - フォークには Secrets がコピーされない
+   - PR からは Secrets にアクセスできない
+
+4. **タグ push トリガー**
+   - タグが push されたときだけ publish
+   - あなたが `npm run release:patch` を実行した時だけ
+
+### リスクシナリオと対策
+
+| シナリオ | リスク | 対策 |
+|---------|--------|------|
+| 誰かが PR でタグを追加 | ❌ なし | PR からタグは push されない |
+| フォークしてタグ作成 | ❌ なし | フォークのタグは本家に影響しない |
+| コラボレーター追加 | ⚠️ あり | ✅ Rulesets で管理者のみに制限 |
+| アカウント乗っ取り | ⚠️ あり | ✅ GitHub・npm で 2FA 有効化 |
+
+### 推奨設定
+
+- ✅ **Rulesets でタグ保護**（必須）
+- ✅ **GitHub で 2FA 有効化**
+- ✅ **npm で 2FA 有効化**
+- ✅ **npm トークンの定期ローテーション**（年1回推奨）
+
 ## チェックリスト
 
 ### リリース前
@@ -512,6 +593,7 @@ npm run release:patch  # または minor / major
 - [npm-version documentation](https://docs.npmjs.com/cli/v10/commands/npm-version)
 - [npm-publish documentation](https://docs.npmjs.com/cli/v10/commands/npm-publish)
 - [npm Tokens](https://docs.npmjs.com/about-access-tokens)
+- [npm 2FA](https://docs.npmjs.com/configuring-two-factor-authentication)
 - [Semantic Versioning](https://semver.org/lang/ja/)
 - [npm Registry](https://www.npmjs.com/)
 
@@ -520,6 +602,8 @@ npm run release:patch  # または minor / major
 - [GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
 - [GitHub CLI - release create](https://cli.github.com/manual/gh_release_create)
 - [Encrypted secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets)
+- [Repository rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)
+- [GitHub 2FA](https://docs.github.com/en/authentication/securing-your-account-with-two-factor-authentication-2fa)
 
 ### このプロジェクト
 - [GitHub Releases](https://github.com/ImaKento/ai-git-tool/releases)
