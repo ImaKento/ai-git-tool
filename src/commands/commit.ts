@@ -50,7 +50,7 @@ export async function runCommitCommand(
   let finalMessage = message;
 
   if (answer === "e" || answer === "edit") {
-    finalMessage = editInEditor(message);
+    finalMessage = await editInEditor(message);
     if (!finalMessage) {
       console.log("Aborted: empty message.");
       process.exit(0);
