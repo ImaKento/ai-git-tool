@@ -5,6 +5,7 @@ import { showFriendlyError } from "../utils/errors.js";
 import {
   checkGHCLI,
   checkGHAuth,
+  checkSSHAgentIfNeeded,
   detectBaseBranch,
   getBranchDiff,
   getPullRequestURL,
@@ -24,6 +25,7 @@ import {
 export async function runPRCommand(language: Language): Promise<void> {
   checkGHCLI(language);
   checkGHAuth(language);
+  checkSSHAgentIfNeeded(language);
 
   const baseBranch = detectBaseBranch(language);
   const currentBranch = getCurrentBranch();
@@ -90,7 +92,7 @@ export async function runPRCommand(language: Language): Promise<void> {
   let finalDescription = description;
 
   if (answer === "e" || answer === "edit") {
-    finalDescription = editInEditor(description);
+    finalDescription = await editInEditor(description);
     if (!finalDescription) {
       console.log("Aborted: empty description.");
       process.exit(0);
