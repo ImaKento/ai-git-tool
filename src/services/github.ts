@@ -4,6 +4,76 @@ import { showFriendlyError } from "../utils/errors.js";
 import { askUser } from "../utils/ui.js";
 
 /**
+ * SSH リモートを使っている場合、SSH Agent の状態を確認
+ */
+export function checkSSHAgentIfNeeded(language: Language): void {
+  let remoteUrl: string;
+  try {
+    remoteUrl = execSync("git remote get-url origin", {
+      encoding: "utf-8",
+      stdio: "pipe",
+    }).trim();
+  } catch {
+    return;
+  }
+
+  const isSSH =
+    remoteUrl.startsWith("git@") || remoteUrl.startsWith("ssh://");
+  if (!isSSH) return;
+
+  try {
+    execSync("ssh-add -l", { encoding: "utf-8", stdio: "pipe" });
+  } catch (err) {
+    // ssh-add コマンド自体がない環境はスキップ
+    if ((err as { code?: string }).code === "ENOENT") return;
+
+    // exit 1 (キー未登録) / exit 2 (エージェント未起動) のどちらも対象
+    if (language === "ja") {
+      showFriendlyError(
+        "SSH Agent が設定されていません",
+        `リモートが SSH (${remoteUrl}) を使用していますが、SSH Agent が起動していないかキーが登録されていません`,
+        [
+          "【Linux/macOS】SSH Agent を起動してキーを追加:",
+          "  eval $(ssh-agent -s)",
+          "  ssh-add ~/.ssh/id_ed25519  (または ~/.ssh/id_rsa)",
+          "【Windows】PowerShell で SSH Agent サービスを有効化:",
+          "  Get-Service ssh-agent | Set-Service -StartupType Automatic",
+          "  Start-Service ssh-agent",
+          "  ssh-add $env:USERPROFILE\\.ssh\\id_ed25519",
+          "GitHub への接続テスト: ssh -T git@github.com",
+          "または HTTPS URL に切り替え: git remote set-url origin https://github.com/<ユーザー>/<リポジトリ>.git",
+        ],
+        [
+          "設定完了後に再実行してください",
+          "SSH 設定ガイド: https://docs.github.com/ja/authentication/connecting-to-github-with-ssh",
+        ],
+      );
+    } else {
+      showFriendlyError(
+        "SSH Agent is not configured",
+        `Remote uses SSH (${remoteUrl}) but SSH Agent is not running or has no keys loaded`,
+        [
+          "[Linux/macOS] Start SSH Agent and add your key:",
+          "  eval $(ssh-agent -s)",
+          "  ssh-add ~/.ssh/id_ed25519  (or ~/.ssh/id_rsa)",
+          "[Windows] Enable SSH Agent service in PowerShell:",
+          "  Get-Service ssh-agent | Set-Service -StartupType Automatic",
+          "  Start-Service ssh-agent",
+          "  ssh-add $env:USERPROFILE\\.ssh\\id_ed25519",
+          "Test GitHub connection: ssh -T git@github.com",
+          "Or switch to HTTPS: git remote set-url origin https://github.com/<user>/<repo>.git",
+        ],
+        [
+          "Run the command again after configuring SSH Agent",
+          "SSH setup guide: https://docs.github.com/en/authentication/connecting-to-github-with-ssh",
+        ],
+      );
+    }
+    process.exit(1);
+  }
+}
+
+/**
  * GitHub CLI がインストールされているかチェック
  */
 export function checkGHCLI(language: Language): void {

@@ -2,6 +2,7 @@ import { execSync } from "child_process";
 import type { Language } from "../types.js";
 import { runCommitCommand } from "./commit.js";
 import { pushCurrentBranch, getCurrentBranch, getStagedDiff, stageAllChanges } from "../utils/git.js";
+import { checkSSHAgentIfNeeded } from "../services/github.js";
 
 /**
  * 未プッシュのコミットがあるかチェック
@@ -46,6 +47,7 @@ export async function runPushCommand(
   language: Language,
   noAdd: boolean,
 ): Promise<void> {
+  checkSSHAgentIfNeeded(language);
   const currentBranch = getCurrentBranch();
 
   // ステージされた変更をチェック（--no-add の場合は git add をスキップ）
