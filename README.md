@@ -150,6 +150,20 @@ ai-git pr
 
 - GitHub CLI (`gh`) がインストール済み ([インストール方法](https://cli.github.com/))
 - `gh auth login` で認証済み
+- リモートが SSH URL (`git@github.com:...`) の場合は SSH Agent が起動済みで、キーが登録済みであること
+
+  ```bash
+  # macOS / Linux
+  eval $(ssh-agent -s)
+  ssh-add ~/.ssh/id_ed25519   # または id_rsa
+
+  # Windows (PowerShell)
+  Get-Service ssh-agent | Set-Service -StartupType Automatic
+  Start-Service ssh-agent
+  ssh-add $env:USERPROFILE\.ssh\id_ed25519
+  ```
+
+  > HTTPS URL (`https://github.com/...`) を使っている場合は不要です。
 
 ### ブランチ作成（自動命名）
 
@@ -232,6 +246,7 @@ ai-git は Git 初心者にも優しいエラーメッセージを表示しま�
 | `これは Git リポジトリではありません`          | Git が初期化されていないディレクトリで実行 | `git init` で初期化、または Git リポジトリに移動                        |
 | `GitHub CLI (gh) がインストールされていません` | PR 作成に必要な gh コマンドがない          | [GitHub CLI](https://cli.github.com/) をインストール                    |
 | `GitHub CLI の認証が必要です`                  | GitHub にログインしていない                | `gh auth login` で認証                                                  |
+| `SSH Agent が設定されていません`               | SSH Agent 未起動またはキー未登録           | `eval $(ssh-agent -s)` → `ssh-add` でキー追加                           |
 | `ベースブランチを検出できませんでした`         | main/master/develop ブランチが存在しない   | リモートから取得: `git fetch origin`                                    |
 | `413 Request too large` / TPM 超過             | 差分が大きすぎる、またはレート制限         | 自動で縮小して再試行されます。それでも失敗する場合は少し待つ            |
 
